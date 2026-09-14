@@ -34,7 +34,7 @@ voice2text：Windows 桌面语音听写工具。按下 Alt+V 开始/停止听写
 
 - **用户**：中文交流；关注可分发性（自包含、一键安装）与最终用户体验
 - **项目上下文**：voice2text 处于从零开发阶段，技术选型已定（sherpa-onnx 流式识别 + Qwen GGUF 校对 + llama-cpp-python）
-- **最近教训**：sherpa-onnx funasr-nano 流式模型的 int8 量化版存在转写文字重复问题（issue #3066），选模型时避开 int8 版
+- **最近教训**：① llama-cpp-python 在 PyPI 只有 sdist、无任何 wheel——Windows wheel 仅在作者索引 abetlen.github.io/llama-cpp-python/whl/cpu/，装依赖必须带 `--extra-index-url`；② sherpa-onnx funasr-nano int8 版有转写重复问题（issue #3066），避开 int8
 - **详细记忆**：[.agents/memory/MEMORY.md](.agents/memory/MEMORY.md)
 
 > 维护细节（写入触发、touch 规范、索引重建）见 MEMORY.md 和 `python scripts/maintain.py`。
@@ -62,7 +62,7 @@ Bugfix 任务（修复 / bug / 报错 / 异常等）必须先查索引段的 bug
 - **全部离线**：不得引入任何云端 API 调用（识别、校对、模型下载均需本地或安装期完成）
 - **模型文件不入库**：`models/` 目录（sherpa-onnx 模型、Qwen GGUF，体积大）不进 git，由安装脚本下载
 - **一键安装**：`install.bat` 必须能从干净 Windows 机器拉起完整环境（venv + 依赖 + 模型），破坏此性质即破坏核心需求
-- **全局热键 Alt+V**：keyboard 库需要管理员权限或 Windows UAC 例外，安装脚本须向用户说明
+- **全局热键 Alt+V**：keyboard 库普通权限即可装钩子；仅焦点在管理员权限窗口时收不到热键（UIPI 限制）。不做默认提权，首次启动自检引导（详见 docs/pitfalls.md）
 
 ### 默认偏好（有充分理由可偏离）
 

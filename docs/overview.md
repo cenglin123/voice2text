@@ -40,16 +40,26 @@ Alt+V（keyboard 全局热键，常驻后台）
 ### 为什么二次校对用 Qwen 小模型（GGUF + llama-cpp-python）
 - **场景**：清理错别字、赘余语气词（"嗯""那个"）、理顺口语，需要生成能力而非纯判别
 - **备选**：BERT 类纠错模型（只能改错别字，无法删语气词/顺句）；要求用户装 Ollama（破坏一键安装）
-- **选择**：Qwen3-1.7B Q4_K_M GGUF（约 1.1GB），llama-cpp-python 有预编译 wheel，CPU 上校对一两句话在数秒内
-- **取舍**：校对质量低于 7B 级模型；做成配置项可换更大模型（如 Qwen3-4B）
+- **选择**：Qwen3-1.7B Q4_K_M GGUF（约 1.1GB）。注意：PyPI 上 llama-cpp-python 只发布 sdist，Windows wheel 在作者索引 `https://abetlen.github.io/llama-cpp-python/whl/cpu/`，安装命令须带 `--extra-index-url`，发行包随包携带 wheel
+- **取舍**：校对质量低于 7B 级模型；做成配置项可换更大模型（如 Qwen3-4B）。Qwen3 默认开启思考模式，校对调用必须 `enable_thinking=False`，否则输出带 `<think>` 段且延迟暴涨；单句校对延迟预算 10s，超时放弃校对保留原文
 
 ### 为什么用剪贴板粘贴而不是模拟键盘逐字输入
 - 中文输入走模拟键击会被输入法拦截/转义；剪贴板粘贴在任何文本框都可靠
-- 取舍：会覆盖用户剪贴板内容——保存/恢复原剪贴板以缓解
+- 取舍：会覆盖用户剪贴板内容——保存/恢复原剪贴板以缓解；MVP 只保证文本格式剪贴板的恢复，图片/文件列表不保证
+
+### 可编辑检测为什么用 UIAutomation
+- pyautogui/pyperclip 没有 UI 元素内省能力，判断不了"光标是否在可编辑控件"
+- Windows 可靠路径是 UIA：`uiautomation` 取焦点控件，ControlType ∈ {Edit, Document} 或 ValuePattern 可写
+- 取舍：UIA 对自绘控件（部分 Qt/Electron/游戏）覆盖不全——查不到控件时默认允许粘贴，config 黑名单可关停指定进程
+
+### 流式 partial 为什么整句刷新而不是增量追加
+- sherpa-onnx `get_result()` 返回当前句累计假设文本，解码中尾部会自我修正（非单调追加），当增量逐次粘贴会出现重复错乱
+- 以句为单位"退格删本句 partial + 重粘最新 partial"；endpoint 触发后锁句不再变动，进入校对队列
+- 取舍：句内刷新有轻微抖动；若体验差可降级为 endpoint 后整句上屏（出字粒度从实时变为按句）
 
 ### 为什么校对要等停顿而不是每句立即触发
 - 边说边校对会反复替换光标处文本，与用户编辑冲突
-- 约 1.5 秒无新语音视为"这句说完了"，一次性校对替换
+- endpoint（约 1.5 秒无新语音）视为"这句说完了"，锁句后一次性校对替换；Alt+V 停止时对尾部音频做最终识别 + 最终校对
 
 ## 不在这里记的内容
 

@@ -18,3 +18,8 @@
 -->
 
 > 本文档的治理规则见 AGENTS.md「文档维护原则」段。
+
+### 开发计划独立审计与修订
+
+#### 变更内容
+- 审计子代理核查结论 needs rework：llama-cpp-python PyPI 无 Windows wheel（blocker，改用 abetlen 索引+随包携带）、Python 本体自包含（embeddable Python）、可编辑检测定案 uiautomation、partial 整句刷新策略；另修 8 项 minor（阶段1占位入口、热键自检判定、Qwen3 关思考模式+10s 超时、停止时终校、临时文件清理、剪贴板仅文本、模型 URL 钉死、托盘依赖前置）。计划/overview/pitfalls/deployment/AGENTS 同步修订
