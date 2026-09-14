@@ -5,7 +5,7 @@
 
 ## 当前任务
 
-开发计划已通过独立子代理审计（结论 needs rework → 已按 1 blocker + 3 major + 8 minor 全部修订完毕），计划与 overview/pitfalls/deployment/AGENTS 已同步修正。等待用户确认计划后进入阶段 1 执行。
+阶段 1（项目骨架 + 一键安装）完成：venv 分支与 embeddable 分支（模拟无 Python 干净机器）全链路实测通过，独立 reviewer 两轮审查（第二轮 pass with issues），全部问题已修复验证并提交。
 
 ## 当前模式
 
@@ -17,7 +17,7 @@
 
 ## 下一步
 
-用户确认修订后的计划 → 阶段 1：项目骨架 + 一键安装（requirements.txt / install.bat / 模型下载脚本）。
+用户确认后进入阶段 2（热键 + 音频采集）：voice2text/hotkey.py、voice2text/capture.py、main.py 挂接常驻循环；开始前重读计划阶段 2 的实现约束（UIPI 事实、首按自检、16k 直采/48k 重采样）。
 
 ## 关联计划
 

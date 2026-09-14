@@ -1,0 +1,30 @@
+# 直接依赖全部钉死为实测可用的版本组合（Windows 全 wheel，零源码编译）。
+# 升级前先在干净环境重验 install.bat。
+
+# 语音识别（流式）。注意 1.13.x 起 Python 模块名是 sherpa_onnx（不再是 sherpa.onnx）
+sherpa-onnx==1.13.8
+numpy==2.4.6
+
+# 音频采集
+sounddevice==0.5.6
+
+# 全局热键
+keyboard==0.13.5
+
+# 焦点控件可编辑检测（UIAutomation）
+uiautomation==2.0.29
+comtypes==1.4.16
+
+# 剪贴板文本读写
+pyperclip==1.11.0
+
+# 剪贴板操作与窗口辅助（win32）
+pywin32==312
+
+# 系统托盘
+pystray==0.19.5
+pillow==12.3.0
+
+# 二次校对推理。注意：PyPI 只有源码包，Windows 预编译 wheel 需要附加索引：
+#   --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu/
+llama-cpp-python==0.3.35

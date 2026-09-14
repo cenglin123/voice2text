@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 models/
+runtime/
+runtime_embed.zip
+get-pip.py
 *.wav
 .env

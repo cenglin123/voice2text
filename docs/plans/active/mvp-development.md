@@ -11,7 +11,7 @@ created_at: 2026-09-15
 
 | 任务 / 阶段 | Owner | 状态 | Reviewer | 备注 |
 |------------|-------|------|----------|------|
-| 阶段 1：项目骨架 + 一键安装 | 主 Agent | queue | 审计子代理（已过一轮） | requirements / install.bat / 模型下载 |
+| 阶段 1：项目骨架 + 一键安装 | 主 Agent | ✅ completed | 审计子代理（两轮） | requirements / install.bat / 模型下载 |
 | 阶段 2：热键 + 音频采集 | 主 Agent | queue | 待定 | Alt+V 开关、麦克风 PCM 流 |
 | 阶段 3：流式识别 + 实时上屏 | 主 Agent | queue | 待定 | sherpa-onnx 集成、UIA 检测、partial 刷新 |
 | 阶段 4：停顿检测 + 二次校对 | 主 Agent | queue | 待定 | Qwen GGUF 校对替换、停止时终校 |
@@ -36,10 +36,20 @@ created_at: 2026-09-15
   1. 无 Python 的干净机器（含仅装 Store 假 python 的机器）执行 install.bat 成功：runtime 就绪、依赖安装零源码编译、models/ 下出现双语 Zipformer 模型与 Qwen GGUF；断网 GitHub 场景 ModelScope fallback 生效
   2. `python -c "import voice2text"` 成功；run.bat 打印配置后正常退出
 - **Owner**：主 Agent
-- **Reviewer**：待定
-- **状态**：queue
+- **Reviewer**：独立 reviewer 子代理
+- **状态**：✅ completed
 - **完成记录**：
+  - 交付文件：requirements.txt（直接依赖全钉死实测版本）、install.bat、run.bat、config.json、voice2text/{__init__,config,main}.py（占位入口）、scripts/download_models.py
+  - 实测（本机 venv 分支）：install.bat 全链路成功；依赖全 wheel 安装零编译；ASR tar.bz2 488MB 下载解压；GGUF 1.03GB 下载且 llama.cpp 1.1s 加载；run.bat exit 0
+  - reviewer 第一轮结论 needs rework：blocker=embeddable Python 隔离模式（._pth 存在时 sys.path 不含 cwd，import voice2text 必败）；major=runtime 半成品死局（python.exe 在但 pip 缺失时重跑跳过 bootstrap）。已修复：._pth 追加 `import site` + `..\..`；就绪判定收紧为 python.exe+pip 双条件，get-pip 段可重入。另吸收 7 项 minor（venv 失败检查、全模块导入验证、get-pip 阿里镜像、坏 tarball 清理、config 损坏兜底、依赖钉版、run.bat 探活）
+  - embeddable 分支修复后已实测走通（bsdtar 解压、_pth 生效、get-pip、依赖安装、全模块导入、main 正常退出）
+  - reviewer 第二轮复核结论 pass with issues，阶段 1 判定通过；三个遗留项已当场修复并验证：A=venv 重建段补版本检查（3.9-only 机器不再死循环/毒化 run.bat）、B=[4/4] 验证补 pythoncom/win32clipboard（pywin32 的可导入名）、C=config 非对象 JSON 兜底；另加 PYTHONNOUSERSITE=1 隔离用户 AppData site-packages（embeddable 实测发现）
 - **交接摘要**：
+  - sherpa-onnx 1.13.8 的 Python 模块名是 `sherpa_onnx`（旧文档/示例中的 `sherpa.onnx` 已废弃）——阶段 3 按新名 import
+  - Qwen3-1.7B Q4_K_M GGUF 实际来自 unsloth 仓（Qwen 官方 GGUF 仓只有 Q8_0）；三路源 HF→hf-mirror→ModelScope 均 200
+  - llama wheel 实际托管在 GitHub Releases（abetlen 索引页只是目录），pip 经索引页可正常解析
+  - Git Bash 里 `tar` 是 GNU tar 不认 zip；bat 在 cmd 下用 System32 bsdtar 正常——开发期手动测试要用 `/c/Windows/System32/tar.exe`
+  - 阶段 2 开始前先读 voice2text/config.py（AppConfig 结构）与 AGENTS.md 硬约束
 
 ### 阶段 2：热键 + 音频采集
 - **目标**：常驻进程监听全局 Alt+V，切换听写开/关；开启时采集麦克风 PCM 送入队列，关闭时停止采集并 flush；首次启动做热键可达性自检
