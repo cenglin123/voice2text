@@ -5,6 +5,8 @@
 
 ## Windows
 
+- **sounddevice 回调缓冲区仅在回调返回前有效**：`indata` 是 PortAudio 内部缓冲区的视图，入队必须 `copy()`；单声道时 `np.ascontiguousarray(indata[:, 0])` 返回视图不拷贝，是隐蔽的悬垂引用。规避：显式 `.copy()`（官方示例 rec_unlimited.py 同款写法）。
+- **键盘事件注入在开发沙箱中不可靠**：ZCode 沙箱会话里 keybd_event/SendInput 注入的按键大部分事件丢失、原生 ctypes 低级钩子安装失败——keyboard 库代码本身正常。规避：热键相关自动化测试只测状态机（直接调回调），真人按键验证放用户验收。
 - **embeddable Python 隔离模式不含 cwd**：存在 `._pth` 文件时 Python 进入隔离模式，sys.path 只有 runtime 目录、pythonXX.zip 和 site-packages——`import voice2text`、`python -m voice2text.main` 都会失败。规避：`._pth` 追加 `import site` 启用 site-packages，并追加 `..\..` 把项目根加入 sys.path（相对路径以 `._pth` 所在目录为基准）。
 - **用户 AppData site-packages 污染 runtime**：`import site` 生效后用户 Roaming 目录（`AppData\Roaming\Python\Python311\site-packages`）也会进 sys.path，装过其他 Python 3.11 包的机器上旧版本 numpy 等可能遮蔽 runtime 内的版本。规避：install.bat / run.bat 设置 `PYTHONNOUSERSITE=1`。
 - **keyboard 全局热键与 UIPI**：普通用户权限即可安装低级键盘钩子；真正的限制是 UIPI——焦点位于管理员权限窗口（任务管理器、管理员 CMD 等）时收不到热键。规避：不做默认提权；仅在用户需要在管理员窗口内听写时建议以管理员运行；首次启动引导按一次 Alt+V 做可达性自检。

@@ -12,7 +12,7 @@ created_at: 2026-09-15
 | 任务 / 阶段 | Owner | 状态 | Reviewer | 备注 |
 |------------|-------|------|----------|------|
 | 阶段 1：项目骨架 + 一键安装 | 主 Agent | ✅ completed | 审计子代理（两轮） | requirements / install.bat / 模型下载 |
-| 阶段 2：热键 + 音频采集 | 主 Agent | queue | 待定 | Alt+V 开关、麦克风 PCM 流 |
+| 阶段 2：热键 + 音频采集 | 主 Agent | ✅ completed | 独立 reviewer 子代理（两轮） | Alt+V 开关、麦克风 PCM 流 |
 | 阶段 3：流式识别 + 实时上屏 | 主 Agent | queue | 待定 | sherpa-onnx 集成、UIA 检测、partial 刷新 |
 | 阶段 4：停顿检测 + 二次校对 | 主 Agent | queue | 待定 | Qwen GGUF 校对替换、停止时终校 |
 | 阶段 5：打磨 + 分发验证 | 主 Agent | queue | 待定 | 干净环境验证、异常处理、托盘 |
@@ -60,11 +60,18 @@ created_at: 2026-09-15
   - 采集参数：优先 16kHz 单声道直接采集；设备不支持时按官方示例以 48kHz 采集再重采样到 16kHz
 - **验证标准**：控制台可见开/关状态日志；采集 PCM 写入调试 wav 可正常播放（调试开关）；拔掉麦克风后程序不崩溃、给出友好提示；热键自检流程按上述判定逻辑触发
 - **Owner**：主 Agent
-- **Reviewer**：待定
+- **Reviewer**：独立 reviewer 子代理
 - **前置条件**：阶段 1 完成
-- **状态**：queue
+- **状态**：✅ completed
 - **完成记录**：
+  - 交付：voice2text/hotkey.py（keyboard 钩子 + 首按自检 + Event 信号）、voice2text/capture.py（16k 直采/设备默认采样率回退重采样、回调→队列、调试 wav、看门狗）、main.py 常驻循环（toggle/drain/错误善后）
+  - 已验证：重采样单测（8k→16k 保频）；回调管线→队列→调试 wav；启动无麦克风的 CaptureError 友好提示（真实触发，本机仅剩未连接的蓝牙幽灵设备）；主循环状态机（mock：开关/drain/CaptureError 不崩溃/采集中断善后/看门狗超时）
+  - reviewer 第一轮 needs rework：blocker=直采路径入队 sounddevice 回调缓冲区视图（`ascontiguousarray` 单声道时不拷贝，阶段 3 会读到垃圾）→ 已改 `copy()` 并加别名回归测试；major=中途拔麦克风静默挂死 → 已加回调时间戳看门狗（3s 无回调报错停会话）。另修 4 项 minor（探测期采样率先赋值、stop/close 各自吞错、self_check 进 try、queue.Empty 精确捕获、调试 wav 落 PROJECT_ROOT），全部回归通过
+  - 环境限制（已核实非代码问题）：本开发环境（ZCode 沙箱）注入按键大部分事件丢失（keybd_event/SendInput/computer-use 均试过，原生 ctypes LL 钩子安装失败），真人按 Alt+V 的端到端验证无法在本环境完成——**列入用户验收清单**
 - **交接摘要**：
+  - 阶段 3 挂接点：`DictationApp._drain()` 是替换点——改为把队列块喂识别线程；`MicrophoneCapture.queue` 以 None 哨兵标记流结束；`seconds_since_audio()` 可复用做停顿参考（但 endpoint 以 sherpa-onnx 自带检测为准）
+  - 采集输出为 float32 单声道 16kHz ndarray 块（约 0.25s/块），与 sherpa-onnx `stream.accept_waveform` 的输入格式直接匹配
+  - 真机麦克风测试同样受限于本机无可用输入设备（蓝牙耳机未连接），采集路径用合成音频验证；用户验收时连同热键一起真机过一遍
 
 ### 阶段 3：流式识别 + 实时上屏
 - **目标**：sherpa-onnx 流式识别线程消费 PCM 队列；可编辑检测（UIAutomation）通过后，partial 文本整句刷新上屏，endpoint 锁句进入待校对队列；不可编辑时静默跳过

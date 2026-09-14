@@ -5,7 +5,7 @@
 
 ## 当前任务
 
-阶段 1（项目骨架 + 一键安装）完成：venv 分支与 embeddable 分支（模拟无 Python 干净机器）全链路实测通过，独立 reviewer 两轮审查（第二轮 pass with issues），全部问题已修复验证并提交。
+阶段 2（热键 + 音频采集）完成：reviewer 两轮审查（第一轮 needs rework → 修复缓冲区别名 blocker 与看门狗 → 回归全过），已提交。遗留到用户验收：真人按 Alt+V 端到端 + 真机麦克风采集（本开发环境注入按键不可靠、无可用麦克风，均已核实为环境限制）。
 
 ## 当前模式
 
@@ -17,7 +17,7 @@
 
 ## 下一步
 
-用户确认后进入阶段 2（热键 + 音频采集）：voice2text/hotkey.py、voice2text/capture.py、main.py 挂接常驻循环；开始前重读计划阶段 2 的实现约束（UIPI 事实、首按自检、16k 直采/48k 重采样）。
+用户确认后进入阶段 3（流式识别 + 实时上屏）：voice2text/asr.py（sherpa_onnx 流式 + endpoint 锁句）、voice2text/input.py（UIA 可编辑检测 + 剪贴板整句刷新 + 记账）、main.py 的 _drain() 替换为喂识别线程。
 
 ## 关联计划
 

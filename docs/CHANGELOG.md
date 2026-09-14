@@ -28,3 +28,8 @@
 
 #### 变更内容
 - 交付 requirements.txt（依赖全钉死实测版本）、install.bat（venv/embeddable 双路径自包含，处理 Store 假 python、._pth 隔离、pip 可重入、PYTHONNOUSERSITE 隔离）、run.bat（解释器探活）、scripts/download_models.py（多源 fallback+断点续传）、voice2text 包骨架（config/main 占位）。venv 与 embeddable 分支均全链路实测；独立 reviewer 两轮审查通过（修复 embeddable 隔离 blocker、3.9 死循环回归等）。已知关键事实：sherpa-onnx 1.13.x 模块名为 sherpa_onnx；Qwen3-1.7B Q4_K_M 来自 unsloth 仓
+
+### 阶段2完成：热键与音频采集
+
+#### 变更内容
+- 交付 hotkey.py（keyboard 钩子+首按自检+Event 信号）、capture.py（16k 直采/设备默认采样率回退重采样、回调拷贝入队、3s 看门狗、调试 wav）、main.py 常驻循环。reviewer 两轮审查：修复直采路径入队回调缓冲区视图（blocker）、中途拔麦克风看门狗等 6 项；环境限制（沙箱注入不可靠/无麦克风）列入用户验收
