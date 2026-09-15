@@ -13,7 +13,7 @@ created_at: 2026-09-15
 |------------|-------|------|----------|------|
 | 阶段 1：项目骨架 + 一键安装 | 主 Agent | ✅ completed | 审计子代理（两轮） | requirements / install.bat / 模型下载 |
 | 阶段 2：热键 + 音频采集 | 主 Agent | ✅ completed | 独立 reviewer 子代理（两轮） | Alt+V 开关、麦克风 PCM 流 |
-| 阶段 3：流式识别 + 实时上屏 | 主 Agent | queue | 待定 | sherpa-onnx 集成、UIA 检测、partial 刷新 |
+| 阶段 3：流式识别 + 实时上屏 | 主 Agent | ✅ completed | 独立 reviewer 子代理（pass with issues → 修复回归） | sherpa-onnx 集成、UIA 检测、partial 刷新 |
 | 阶段 4：停顿检测 + 二次校对 | 主 Agent | queue | 待定 | Qwen GGUF 校对替换、停止时终校 |
 | 阶段 5：打磨 + 分发验证 | 主 Agent | queue | 待定 | 干净环境验证、异常处理、托盘 |
 
@@ -83,11 +83,19 @@ created_at: 2026-09-15
   - 中文上屏走剪贴板 + Ctrl+V 粘贴（模拟键击会被输入法拦截）
 - **验证标准**：记事本/浏览器地址栏/微信输入框中说话，文字随说随出且无重复错乱；焦点在非编辑区（如桌面）说话不上屏不报错；UIA 查不到控件的典型应用（如某 Qt 应用）默认粘贴生效；停止后剪贴板文本内容恢复
 - **Owner**：主 Agent
-- **Reviewer**：待定
+- **Reviewer**：独立 reviewer 子代理
 - **前置条件**：阶段 2 完成
-- **状态**：queue
+- **状态**：✅ completed
 - **完成记录**：
+  - 交付：voice2text/asr.py（StreamingASR + ASRSessionWorker 线程：partial 去重、endpoint 锁句、input_finished 尾句、COM 初始化、异常兜底置 error 标志）、voice2text/input.py（TextInserter：UIA 可编辑检测/黑名单归一化、整句刷新退格+粘贴记账、句间空格、脱管机制、剪贴板保存恢复、会话闸门）、main.py（会话代数过滤迟到回调、worker error 善后、LLM 模型条件检查、懒加载顺序调整）
+  - 已验证：TTS 中文 wav（22.05k→16k 重采样）→ 真 ASR 全链：模型 1.2s 加载、partial 整句刷新、锁句正确（"流式"误识"流逝"、无标点=模型特性，阶段 4 处理）；Inserter 全状态机（黑名单 .exe/大小写归一化、焦点切出脱管跳过、commit 空、剪贴板占用脱管不误删、会话闸门拦截迟到写入/commit、屏幕记账逐字一致）；worker 异常兜底；App 级全链（wav→ASR→模拟屏幕，最终内容逐字正确）
+  - reviewer 结论 pass with issues，3 个 major 已修：①剪贴板瞬态占用/paste 异常静默杀死 worker → _paste 捕获+脱管+worker.error 主循环善后；②焦点切出再切回同句重复上屏+记账漂移 → 脱管机制（本句剩余 partial 全跳过，commit 空，取舍见 pitfalls）；③join 超时残留 worker 污染 → 会话代数 + TextInserter 会话闸门双重拦截。minor 已修：无变化早退省 UIA 查询、黑名单归一化、LLM 条件检查、模型懒加载失败回滚、commit 闸门
+  - 遗留（minor，记录在案）：提权窗口盲粘贴的记账漂移风险（pitfalls，用户验收观察）；uiautomation 单例跨线程 COM 公寓不严格（实践可用，多会话真机冒烟）
 - **交接摘要**：
+  - 阶段 4 挂接点：`DictationApp._on_sentence`（gen, text）是校对触发点；`TextInserter` 是上屏唯一记账者——**校对替换必须走 TextInserter 新增 API（如 replace_committed），禁止外部直改记账**（overview 不变量）
+  - 已知模型特性：双语 Zipformer 无标点输出、同音字错误（流式→流逝）——校对 prompt 需承担加标点职责
+  - 真机说话→记事本上屏的端到端（含 Qt 应用默认粘贴、提权窗口行为）列入用户验收：本环境无麦克风+按键注入不可靠
+  - `committed_chars` 为单一累计值，阶段 4 替换第 k 句需按句偏移定位——建议实现时给 TextInserter 加 `_sentence_offsets`
 
 ### 阶段 4：停顿检测 + 二次校对
 - **目标**：endpoint（停顿阈值约 1.5s）触发校对；llama-cpp-python 加载 Qwen GGUF 校对已锁定的句子；退格抹除原文并粘贴校对结果；Alt+V 停止时对尾部音频做最终识别 + 最终校对

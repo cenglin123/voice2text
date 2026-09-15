@@ -1,18 +1,19 @@
-"""程序入口：常驻进程，Alt+V 切换听写采集。
+"""程序入口：常驻进程，Alt+V 切换听写。
 
-阶段 2 范围：热键开关 + 麦克风采集（调试 wav 可验证）。阶段 3 在此挂接流式识别与上屏，
-阶段 4 挂接停顿校对。消费不到的音频块在主循环里丢弃，防止队列无限增长。
+阶段 3 范围：热键开关 + 采集 + sherpa-onnx 流式识别 + 光标处整句刷新上屏 + endpoint 锁句。
+阶段 4 在锁句回调处挂接二次校对。
 """
 
 from __future__ import annotations
 
-import queue
 import sys
 
 from voice2text import __version__
+from voice2text.asr import ASRSessionWorker, StreamingASR
 from voice2text.capture import WATCHDOG_SECONDS, CaptureError, MicrophoneCapture
 from voice2text.config import AppConfig, load_config
 from voice2text.hotkey import HotkeyListener
+from voice2text.input import TextInserter
 
 ASR_REQUIRED_FILES = (
     "encoder-epoch-99-avg-1.onnx",
@@ -23,27 +24,32 @@ ASR_REQUIRED_FILES = (
 
 
 def check_models(cfg: AppConfig) -> bool:
-    """检查识别与校对模型文件是否就位（安装脚本跑完即应通过）。"""
+    """检查模型文件是否就位（安装脚本跑完即应通过）。"""
     ok = True
     for name in ASR_REQUIRED_FILES:
         if not cfg.asr_file(name).is_file():
             print(f"  [缺失] ASR 模型文件: {cfg.asr_file(name)}")
             ok = False
-    if not cfg.llm_model_path.is_file():
+    if cfg.proofread_enabled and not cfg.llm_model_path.is_file():
         print(f"  [缺失] 校对模型文件: {cfg.llm_model_path}")
         ok = False
     return ok
 
 
 class DictationApp:
-    """听写主循环：等待热键切换信号，管理采集会话的生命周期。"""
+    """听写主循环：热键信号 → 会话生命周期（采集/识别/上屏）。"""
 
     def __init__(self, cfg: AppConfig) -> None:
         self._cfg = cfg
         self._capture = MicrophoneCapture(
             target_rate=cfg.sample_rate, debug_dump_wav=cfg.debug_dump_wav
         )
+        self._inserter = TextInserter(cfg.non_editable_process_blacklist)
+        self._asr: StreamingASR | None = None  # 懒加载（首次会话时，加载约 1 秒）
+        self._worker: ASRSessionWorker | None = None
         self._active = False
+        self._session_gen = 0  # 会话代数：旧 worker 的迟到回调不得写新会话的屏
+        self._locked_sentences: list[str] = []  # 阶段 4 校对队列的雏形
 
     @property
     def active(self) -> bool:
@@ -56,31 +62,59 @@ class DictationApp:
             self._start_session()
 
     def _start_session(self) -> None:
+        # 识别器先于采集就位：模型加载失败时不必回滚已启动的采集/剪贴板状态
+        if self._asr is None:
+            print("  （首次会话：加载识别模型…）")
+            try:
+                self._asr = StreamingASR(self._cfg)
+            except Exception as exc:  # noqa: BLE001 —— 模型缺失/损坏给用户可读提示
+                print(f"[听写未开始] 识别模型加载失败：{exc}")
+                return
         try:
             self._capture.start()
         except CaptureError as exc:
             print(f"[听写未开始] {exc}")
             return
+        self._session_gen += 1
+        gen = self._session_gen
+        self._inserter.begin_session()
+        self._locked_sentences = []
+        self._worker = ASRSessionWorker(
+            asr=self._asr,
+            audio_queue=self._capture.queue,
+            sample_rate=self._cfg.sample_rate,
+            on_partial=lambda text: self._on_partial(gen, text),
+            on_sentence=lambda text: self._on_sentence(gen, text),
+        )
+        self._worker.start()
         self._active = True
         print(f"[听写中] 再按 {self._cfg.hotkey} 停止")
 
     def _stop_session(self) -> None:
-        wav_path = self._capture.stop()
+        self._inserter.end_session()  # 先关写入闸门：join 超时残留的旧 worker 回调变 no-op
+        self._capture.stop()  # 放入 None 哨兵 → 识别线程完成尾句后自行退出
+        if self._worker is not None:
+            self._worker.join(timeout=5.0)
+            if self._worker.is_alive():
+                print("[警告] 识别线程未在预期内结束（其迟到写入会被会话闸门拦截）")
+            self._worker = None
         self._active = False
-        msg = "[已停止] 待命中"
-        if wav_path is not None:
-            msg += f"（调试录音: {wav_path}）"
-        print(msg)
+        print(f"[已停止] 本轮共 {len(self._locked_sentences)} 句")
 
-    def _drain(self) -> None:
-        """阶段 2 无识别消费者：丢弃已采集音频，只保留错误信息。阶段 3 改为喂给识别线程。"""
-        while True:
-            try:
-                chunk = self._capture.queue.get_nowait()
-            except queue.Empty:
-                return
-            if chunk is None:
-                return
+    # ---- 识别线程回调（在识别线程中执行；gen 过滤旧会话的迟到回调）----
+
+    def _on_partial(self, gen: int, text: str) -> None:
+        if gen != self._session_gen:
+            return
+        self._inserter.replace_current(text)
+
+    def _on_sentence(self, gen: int, text: str) -> None:
+        if gen != self._session_gen:
+            return
+        self._inserter.replace_current(text)  # 确保屏幕上是最终文本（partial 可能滞后）
+        committed = self._inserter.commit_current()
+        if committed:  # 脱管句屏幕上没有文本，不进句列表
+            self._locked_sentences.append(committed)
 
     def _check_watchdog(self) -> None:
         """会话中设备无响应（如中途拔出麦克风）的看门狗：超过阈值无回调即报错停会话。"""
@@ -102,9 +136,12 @@ class DictationApp:
                     hotkey.clear_toggle()
                     self.toggle()
                 if self._active:
-                    self._drain()
+                    worker_error = self._worker.error if self._worker else None
                     if self._capture.error:  # 采集中途拔麦克风等
                         print(f"[听写中断] {self._capture.error}")
+                        self._stop_session()
+                    elif worker_error:  # 识别/上屏线程致命异常
+                        print(f"[听写中断] {worker_error}")
                         self._stop_session()
                     else:
                         self._check_watchdog()

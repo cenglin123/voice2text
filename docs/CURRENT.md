@@ -5,7 +5,7 @@
 
 ## 当前任务
 
-阶段 2（热键 + 音频采集）完成：reviewer 两轮审查（第一轮 needs rework → 修复缓冲区别名 blocker 与看门狗 → 回归全过），已提交。遗留到用户验收：真人按 Alt+V 端到端 + 真机麦克风采集（本开发环境注入按键不可靠、无可用麦克风，均已核实为环境限制）。
+阶段 3（流式识别 + 实时上屏）完成：真 ASR 全链验证（TTS 音频→流式解码→整句刷新→锁句）、reviewer pass with issues → 3 major + 5 minor 修复回归，已提交。
 
 ## 当前模式
 
@@ -17,7 +17,7 @@
 
 ## 下一步
 
-用户确认后进入阶段 3（流式识别 + 实时上屏）：voice2text/asr.py（sherpa_onnx 流式 + endpoint 锁句）、voice2text/input.py（UIA 可编辑检测 + 剪贴板整句刷新 + 记账）、main.py 的 _drain() 替换为喂识别线程。
+用户确认后进入阶段 4（停顿检测 + 二次校对）：voice2text/proofread.py（Qwen3 关思考模式 + 10s 超时兜底）、TextInserter 增加 replace_committed API（按句偏移替换）、_on_sentence 挂校对、Alt+V 停止时尾句终校。真机验收清单已累计：真人 Alt+V、真麦克风（EDIFIER 音响连上即见）、焦点切出切回、提权窗口观察。
 
 ## 关联计划
 
