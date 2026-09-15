@@ -38,3 +38,8 @@
 
 #### 变更内容
 - 交付 asr.py（StreamingASR+worker线程：partial去重/endpoint锁句/尾句/COM/异常兜底）、input.py（TextInserter：UIA检测/黑名单归一化/整句刷新记账/脱管机制/会话闸门/剪贴板恢复）、main.py（会话代数/懒加载顺序/worker错误善后）。真ASR全链验证（TTS wav→识别→模拟屏幕逐字一致）。reviewer pass with issues：修3 major（剪贴板占用杀worker、焦点切出切回重复上屏、join超时旧worker污染）+5 minor
+
+### 阶段4完成：停顿检测与二次校对
+
+#### 变更内容
+- 交付 proofread.py（Qwen3 /no_think+门禁+软超时+COM）、TextInserter.replace_committed（按句替换唯一入口+锁串行化）、main 接线（停止顺序修正：ASR→校对→关闸，尾句全链走完）。真实模型验证：语气词清除+标点补全，单句 0.4-1.1s；App 级两语音全链最终屏幕为整洁书面语。reviewer pass with issues：修 COM 初始化 major + 6 minor

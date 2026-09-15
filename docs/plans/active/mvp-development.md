@@ -14,7 +14,7 @@ created_at: 2026-09-15
 | 阶段 1：项目骨架 + 一键安装 | 主 Agent | ✅ completed | 审计子代理（两轮） | requirements / install.bat / 模型下载 |
 | 阶段 2：热键 + 音频采集 | 主 Agent | ✅ completed | 独立 reviewer 子代理（两轮） | Alt+V 开关、麦克风 PCM 流 |
 | 阶段 3：流式识别 + 实时上屏 | 主 Agent | ✅ completed | 独立 reviewer 子代理（pass with issues → 修复回归） | sherpa-onnx 集成、UIA 检测、partial 刷新 |
-| 阶段 4：停顿检测 + 二次校对 | 主 Agent | queue | 待定 | Qwen GGUF 校对替换、停止时终校 |
+| 阶段 4：停顿检测 + 二次校对 | 主 Agent | ✅ completed | 独立 reviewer 子代理（pass with issues → 修复回归） | Qwen GGUF 校对替换、停止时终校 |
 | 阶段 5：打磨 + 分发验证 | 主 Agent | queue | 待定 | 干净环境验证、异常处理、托盘 |
 
 ## 目标
@@ -107,11 +107,18 @@ created_at: 2026-09-15
   - 停止语义：Alt+V 停止 → 对剩余音频执行 `input_finished()` 完成最终识别 → 尾句照常走一次校对 → 程序回到待命
 - **验证标准**：说一段带"嗯、那个"的口语，停顿后上屏文本变为整洁书面语；说完立即按 Alt+V，尾句同样被校对；校对超时场景（模拟）跳过校对不卡死；替换无字符错位
 - **Owner**：主 Agent
-- **Reviewer**：待定
+- **Reviewer**：独立 reviewer 子代理
 - **前置条件**：阶段 3 完成
-- **状态**：queue
+- **状态**：✅ completed
 - **完成记录**：
+  - 交付：voice2text/proofread.py（Proofreader：/no_think + think 剥离 + 引号/前缀剥壳 + bigram 重叠率≥0.3 跑题门禁 + max_tokens 延迟封顶；ProofreadWorker：串行校对线程、软超时丢弃结果、COM 初始化、异常兜底）、TextInserter.replace_committed（按句替换唯一入口：_committed_texts 记账、后缀退格重粘、边界空格保持、粘贴失败 aborted 停写防连锁错删、_lock 串行化识别/校对并发）、main 接线（校对线程先于识别线程启动、_on_sentence 提交校对队列、_on_proofread 走会话代数门、_stop_session 顺序修正为 ASR→校对→关闸、粘贴冲突提示）
+  - 已验证（真实模型）：Qwen3-1.7B 加载 0.7s、单句校对 0.4-1.1s（预算 10s）；few-shot 示例修复长句原文照抄问题；语气词清除+标点补全（"嗯那个今天天气真好我们一起去公园散步吧"→"今天天气真好，我们一起去公园散步吧。"）；英文保持；超时兜底（stub 慢校对器结果丢弃不卡死）；replace_committed 三句+partial 场景逐字正确、越界/关闸/不可编辑拒绝；App 级全链（两语音+2s静音）：endpoint 分 2 句 → 最终屏幕"今天天气真好，我们一起去公园散步吧。明天下午三点开会记得提醒我一下。"（尾句校对生效）
+  - reviewer pass with issues，全部修复：major=ProofreadWorker 缺 COM 初始化（替换路径可编辑闸门被旁路）→ 补 CoInitialize；minor=末句替换后尾字符更新、未闭合 think/输出前缀/bigram 门禁、aborted 用户提示、pr worker 先建、僵尸线程说明、死代码删除
+  - 已知取舍：领域同音字（"流式"→"流逝"）1.7B 无上下文纠不了——用户可换更大模型（config 换 GGUF 路径）；粘贴失败停写属防连锁错删的安全取舍
 - **交接摘要**：
+  - 阶段 5 待办：托盘常驻（pystray）、异常注入验证（拔麦/删模型/热键占用）、临时音频清理（debug_capture.wav + __pycache__）、干净机器完整走查、发行打包（llama wheel 随包）、AGENTS 临时缓冲约束核查
+  - 真机验收清单（累计）：真人 Alt+V、真麦克风（EDIFIER 音响）、焦点切出切回（验脱管）、提权窗口观察（UIPI 盲贴风险）、锁句后切焦点（验替换拦截）、英文句句间空格、超长单句（>300字）n_ctx 行为
+  - reviewer 提出的阶段 5 评估项：Ctrl+V 注入后紧邻的剪贴板覆盖竞态（同锁串行已保证注入顺序，可考虑粘贴后小延时）
 
 ### 阶段 5：打磨 + 分发验证
 - **目标**：异常处理、系统托盘常驻 + 状态提示、中文 UTF-8 输出、临时文件清理、发行打包（含 wheel 随包）

@@ -14,6 +14,7 @@ from voice2text.capture import WATCHDOG_SECONDS, CaptureError, MicrophoneCapture
 from voice2text.config import AppConfig, load_config
 from voice2text.hotkey import HotkeyListener
 from voice2text.input import TextInserter
+from voice2text.proofread import Proofreader, ProofreadWorker
 
 ASR_REQUIRED_FILES = (
     "encoder-epoch-99-avg-1.onnx",
@@ -46,10 +47,12 @@ class DictationApp:
         )
         self._inserter = TextInserter(cfg.non_editable_process_blacklist)
         self._asr: StreamingASR | None = None  # 懒加载（首次会话时，加载约 1 秒）
+        self._proofreader: Proofreader | None = None  # 懒加载（首次会话时，加载约 1-2 秒）
         self._worker: ASRSessionWorker | None = None
+        self._pr_worker: ProofreadWorker | None = None
         self._active = False
         self._session_gen = 0  # 会话代数：旧 worker 的迟到回调不得写新会话的屏
-        self._locked_sentences: list[str] = []  # 阶段 4 校对队列的雏形
+        self._locked_sentences: list[str] = []  # 原始锁句文本（校对前的 ASR 输出）
 
     @property
     def active(self) -> bool:
@@ -70,6 +73,13 @@ class DictationApp:
             except Exception as exc:  # noqa: BLE001 —— 模型缺失/损坏给用户可读提示
                 print(f"[听写未开始] 识别模型加载失败：{exc}")
                 return
+        if self._cfg.proofread_enabled and self._proofreader is None:
+            print("  （首次会话：加载校对模型…）")
+            try:
+                self._proofreader = Proofreader(self._cfg)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[警告] 校对模型加载失败，二次校对已停用：{exc}")
+                self._cfg.proofread_enabled = False
         try:
             self._capture.start()
         except CaptureError as exc:
@@ -79,6 +89,13 @@ class DictationApp:
         gen = self._session_gen
         self._inserter.begin_session()
         self._locked_sentences = []
+        # 校对线程先于识别线程就位：消除首句锁句时 pr_worker 尚为 None 的微窗口
+        if self._cfg.proofread_enabled:
+            self._pr_worker = ProofreadWorker(
+                proofreader=self._proofreader,
+                timeout=self._cfg.proofread_timeout_seconds,
+                on_result=lambda i, orig, fixed: self._on_proofread(gen, i, orig, fixed),
+            )
         self._worker = ASRSessionWorker(
             asr=self._asr,
             audio_queue=self._capture.queue,
@@ -86,18 +103,29 @@ class DictationApp:
             on_partial=lambda text: self._on_partial(gen, text),
             on_sentence=lambda text: self._on_sentence(gen, text),
         )
+        if self._pr_worker is not None:
+            self._pr_worker.start()
         self._worker.start()
         self._active = True
         print(f"[听写中] 再按 {self._cfg.hotkey} 停止")
 
     def _stop_session(self) -> None:
-        self._inserter.end_session()  # 先关写入闸门：join 超时残留的旧 worker 回调变 no-op
+        # 顺序关键：尾句要经历"最终识别 → 上屏 → 校对替换"全程，剪贴板闸门必须最后关。
+        # 迟到回调的防护由会话代数（gen 比对）承担，不依赖闸门先关。
         self._capture.stop()  # 放入 None 哨兵 → 识别线程完成尾句后自行退出
         if self._worker is not None:
             self._worker.join(timeout=5.0)
             if self._worker.is_alive():
-                print("[警告] 识别线程未在预期内结束（其迟到写入会被会话闸门拦截）")
+                print("[警告] 识别线程未在预期内结束（其迟到回调会被会话代数拦截）")
             self._worker = None
+        if self._pr_worker is not None:
+            # 尾句校对：处理完已提交句子后退出；join 预算 = 每句超时 ×2（上限 30s）
+            self._pr_worker.finish()
+            self._pr_worker.join(timeout=min(30.0, self._cfg.proofread_timeout_seconds * 2))
+            if self._pr_worker.is_alive():
+                print("[警告] 校对线程未在预期内结束（残留线程会先排空旧队列，其迟到回调被会话代数拦截）")
+            self._pr_worker = None
+        self._inserter.end_session()  # 关写入闸门 + 恢复用户剪贴板
         self._active = False
         print(f"[已停止] 本轮共 {len(self._locked_sentences)} 句")
 
@@ -113,8 +141,19 @@ class DictationApp:
             return
         self._inserter.replace_current(text)  # 确保屏幕上是最终文本（partial 可能滞后）
         committed = self._inserter.commit_current()
-        if committed:  # 脱管句屏幕上没有文本，不进句列表
-            self._locked_sentences.append(committed)
+        if not committed:  # 脱管句屏幕上没有文本，不进句列表/校对队列
+            return
+        index = len(self._locked_sentences)
+        self._locked_sentences.append(committed)
+        if self._pr_worker is not None:
+            self._pr_worker.submit(index, committed)
+
+    # ---- 校对线程回调（在校对线程中执行；gen 过滤 + 迟到结果丢弃）----
+
+    def _on_proofread(self, gen: int, index: int, original: str, corrected: str | None) -> None:
+        if gen != self._session_gen or corrected is None:
+            return
+        self._inserter.replace_committed(index, corrected)
 
     def _check_watchdog(self) -> None:
         """会话中设备无响应（如中途拔出麦克风）的看门狗：超过阈值无回调即报错停会话。"""
@@ -137,11 +176,18 @@ class DictationApp:
                     self.toggle()
                 if self._active:
                     worker_error = self._worker.error if self._worker else None
+                    pr_error = self._pr_worker.error if self._pr_worker else None
                     if self._capture.error:  # 采集中途拔麦克风等
                         print(f"[听写中断] {self._capture.error}")
                         self._stop_session()
                     elif worker_error:  # 识别/上屏线程致命异常
                         print(f"[听写中断] {worker_error}")
+                        self._stop_session()
+                    elif pr_error:  # 校对线程致命异常：降级继续听写，不影响上屏
+                        print(f"[警告] 校对已停止：{pr_error}")
+                        self._pr_worker = None
+                    elif self._inserter.aborted:  # 粘贴冲突停写：提示一次并停会话
+                        print("[听写中断] 剪贴板持续被占用，上屏已暂停。重新按热键开始可恢复。")
                         self._stop_session()
                     else:
                         self._check_watchdog()
