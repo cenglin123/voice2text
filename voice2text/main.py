@@ -367,7 +367,7 @@ def _gui_main() -> int:
                         "proofread_enabled": cfg.proofread_enabled,
                         "sound_cue": cfg.sound_cue,
                     }
-                    ui.settings = SettingsWindow(cfg_dict, app.apply_settings)
+                    ui.settings = SettingsWindow(cfg_dict, app.apply_settings, ui.widget.snapshot())
                 else:
                     w.root.attributes("-topmost", True)
                     w.root.lift()

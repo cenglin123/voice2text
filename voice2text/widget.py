@@ -117,6 +117,10 @@ class DictationWidget:
     def state(self) -> str:
         return self._state
 
+    def snapshot(self) -> Image.Image:
+        """返回未施加整体透明度的当前画面，供设置页预览。"""
+        return self._last_pil.copy()
+
     # ---- 渲染（PIL 3x 超采样）----
 
     def _render(self) -> None:

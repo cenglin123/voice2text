@@ -1,6 +1,6 @@
 """设置窗口（tkinter，美术稿 assets/设置菜单.jpg）：快捷键、悬浮窗外观、功能开关。
 
-UI 全部 Canvas 手绘（无边框自定义标题栏、圆角滑条、胶囊开关），与悬浮窗同风格。
+深蓝侧栏与圆角分区，原生文字控件结合超采样绘图，小屏幕支持滚动。
 保存 = 先应用（热键 rebind 失败回退旧值），再以生效值写 config.json。
 自启动用 HKCU Run 注册表项，指向 run_gui.pyw（pythonw -I 无控制台启动）。
 """
@@ -8,19 +8,85 @@ UI 全部 Canvas 手绘（无边框自定义标题栏、圆角滑条、胶囊开
 from __future__ import annotations
 
 import json
+import math
 import tkinter
 import winreg
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageTk
+
 from voice2text.config import PROJECT_ROOT
 
-_BG = "#151D2A"
-_CARD = "#212B3B"
-_CARD_EDGE = "#33405A"
-_TEXT = "#E8EDF4"
-_SUB = "#97A3B4"
-_ACCENT = "#4C9DF8"
-_TRACK = "#161E2A"
+_BG = "#16243D"
+_CARD = "#20314D"
+_CARD_EDGE = "#344865"
+_TEXT = "#EDF3FC"
+_SUB = "#A5B5CD"
+_ACCENT = "#519CFF"
+_TRACK = "#132139"
+_SIDE = "#1B2D4B"
+_FONT = "Microsoft YaHei UI"
+
+
+def _nav_icon(kind: str) -> ImageTk.PhotoImage:
+    image = Image.new("RGBA", (72, 72))
+    d = ImageDraw.Draw(image)
+    color = "#BED1EC"
+    if kind == "all":
+        points = []
+        for i in range(48):
+            angle = math.tau * i / 48
+            radius = 27 if i % 6 in (1, 2, 3, 4) else 21
+            points.append((36 + radius * math.cos(angle), 36 + radius * math.sin(angle)))
+        d.line(points + [points[0]], fill=color, width=4, joint="curve")
+        d.ellipse((27, 27, 45, 45), outline=color, width=4)
+    elif kind == "hotkey":
+        d.rounded_rectangle((8, 17, 64, 55), radius=6, outline=color, width=4)
+        for y in (27, 36):
+            for x in (19, 30, 41, 52):
+                d.ellipse((x - 2, y - 2, x + 2, y + 2), fill=color)
+        d.line((24, 46, 48, 46), fill=color, width=3)
+    elif kind == "appearance":
+        d.rounded_rectangle((9, 12, 63, 49), radius=5, outline=color, width=4)
+        d.line((36, 49, 36, 60), fill=color, width=4)
+        d.line((24, 60, 48, 60), fill=color, width=4)
+    else:
+        d.rounded_rectangle((27, 9, 45, 42), radius=9, outline=color, width=4)
+        d.arc((18, 22, 54, 53), 0, 180, fill=color, width=4)
+        d.line((36, 53, 36, 63), fill=color, width=4)
+        d.line((27, 63, 45, 63), fill=color, width=4)
+    return ImageTk.PhotoImage(image.resize((24, 24), Image.Resampling.LANCZOS))
+
+
+def _surface(w: int, h: int, radius: int, fill: str, edge: str | None = None) -> ImageTk.PhotoImage:
+    """控件背景统一超采样，避免 Tk 原生圆弧的锯齿。"""
+    image = Image.new("RGBA", (w * 3, h * 3))
+    ImageDraw.Draw(image).rounded_rectangle(
+        (1, 1, w * 3 - 2, h * 3 - 2), radius=radius * 3,
+        fill=fill, outline=edge, width=3,
+    )
+    return ImageTk.PhotoImage(image.resize((w, h), Image.Resampling.LANCZOS))
+
+
+class Card(tkinter.Canvas):
+    """圆角卡片，内部仍用原生布局管理文本与交互。"""
+
+    def __init__(self, master):
+        super().__init__(master, bg=_BG, highlightthickness=0, height=1)
+        self.content = tkinter.Frame(self, bg=_CARD)
+        self._item = self.create_window(18, 10, window=self.content, anchor="nw")
+        self.bind("<Configure>", self._layout)
+        self.content.bind("<Configure>", self._layout)
+
+    def _layout(self, _ev=None):
+        w = max(60, self.winfo_width())
+        self.itemconfigure(self._item, width=w - 36)
+        h = self.content.winfo_reqheight() + 20
+        self.configure(height=h)
+        self._image = _surface(w, h, 12, _CARD, _CARD_EDGE)
+        self.delete("surface")
+        self.create_image(0, 0, image=self._image, anchor="nw", tags="surface")
+        self.tag_lower("surface")
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_NAME = "voice2text"
@@ -74,23 +140,23 @@ class Toggle(tkinter.Canvas):
     """胶囊开关（美术稿样式）：开=蓝色，关=深灰。"""
 
     def __init__(self, master, variable: tkinter.BooleanVar, command=None):
-        super().__init__(master, width=46, height=24, bg=master["bg"], highlightthickness=0, cursor="hand2")
+        super().__init__(master, width=46, height=26, bg=master["bg"], highlightthickness=1,
+                         highlightbackground=master["bg"], highlightcolor=_ACCENT,
+                         cursor="hand2", takefocus=True)
         self._var = variable
         self._command = command
         self.bind("<Button-1>", self._flip)
+        self.bind("<space>", self._flip)
         self._draw()
 
     def _draw(self) -> None:
         self.delete("all")
         on = bool(self._var.get())
         track = _ACCENT if on else "#39465C"
-        self.create_round = None
-        # 圆角轨道
-        self.create_polygon(
-            [1, 2, 45, 2, 45, 22, 1, 22], smooth=True, fill=track, outline=""
-        )
+        self._image = _surface(46, 26, 13, track, None if on else "#6C809E")
+        self.create_image(0, 0, image=self._image, anchor="nw")
         kx = 33 if on else 13
-        self.create_oval(kx - 8, 4, kx + 8, 20, fill="#F2F5F9", outline="")
+        self.create_oval(kx - 8, 5, kx + 8, 21, fill="#F2F5F9", outline="")
 
     def _flip(self, _ev) -> None:
         self._var.set(not bool(self._var.get()))
@@ -100,44 +166,52 @@ class Toggle(tkinter.Canvas):
 
 
 class Slider(tkinter.Canvas):
-    """圆角滑条：轨道 + 已填充段 + 圆形旋钮，拖动设置 0~100。"""
+    """圆角滑条：在调用方指定的百分比范围内拖动或用方向键调整。"""
 
-    def __init__(self, master, variable: tkinter.DoubleVar, w: int = 240):
-        super().__init__(master, width=w, height=26, bg=master["bg"], highlightthickness=0)
+    def __init__(self, master, variable: tkinter.DoubleVar, w: int = 240,
+                 minimum: int = 0, maximum: int = 100):
+        super().__init__(master, width=w, height=28, bg=master["bg"], highlightthickness=1,
+                         highlightbackground=master["bg"], highlightcolor=_ACCENT,
+                         takefocus=True, cursor="hand2")
         self._var = variable
+        self._minimum, self._maximum = minimum, maximum
         self._track_w = w
         self._pad = 8
         self.bind("<Button-1>", self._on_drag)
         self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Configure>", self._resize)
+        self.bind("<Left>", lambda e: self._step(-1))
+        self.bind("<Right>", lambda e: self._step(1))
         self._draw()
 
     def _pct(self) -> float:
         v = float(self._var.get())
-        return max(0.0, min(1.0, v / 100.0))
+        return max(0.0, min(1.0, (v - self._minimum) / (self._maximum - self._minimum)))
+
+    def _resize(self, ev):
+        self._track_w = ev.width - 2
+        self._draw()
+
+    def _step(self, delta):
+        self._var.set(max(self._minimum, min(self._maximum, self._var.get() + delta)))
+        self._draw()
 
     def _draw(self) -> None:
         self.delete("all")
         y = 13
         x0, x1 = self._pad, self._track_w - self._pad
-        self.create_rectangle(x0, y - 2, x1, y + 2, fill=_TRACK, width=0)
+        self.create_line(x0, y, x1, y, fill="#384D6D", width=5, capstyle="round")
         px = x0 + int((x1 - x0) * self._pct())
         if px > x0:
-            self.create_rectangle(x0, y - 2, px, y + 2, fill=_ACCENT, width=0)
-        self.create_oval(px - 7, y - 7, px + 7, y + 7, fill="#F2F5F9", outline="")
+            self.create_line(x0, y, px, y, fill=_ACCENT, width=5, capstyle="round")
+        self.create_oval(px - 9, y - 9, px + 9, y + 9, fill=_ACCENT, outline="")
+        self.create_oval(px - 5, y - 5, px + 5, y + 5, fill="#E8F2FF", outline="")
 
     def _on_drag(self, ev) -> None:
         x0, x1 = self._pad, self._track_w - self._pad
         pct = max(0.0, min(1.0, (ev.x - x0) / (x1 - x0)))
-        self._var.set(round(pct * 100))
+        self._var.set(round(self._minimum + pct * (self._maximum - self._minimum)))
         self._draw()
-
-
-def _rounded(canvas: tkinter.Canvas, x0, y0, x1, y1, r, **kw) -> None:
-    pts = [
-        x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
-        x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
-    ]
-    canvas.create_polygon(pts, smooth=True, **kw)
 
 
 # ---- 组合串规范化 ----
@@ -176,115 +250,239 @@ def _normalize_combo(ev) -> str | None:
 class SettingsWindow:
     """设置窗口。apply_cb(config_dict) 在保存时被调用（主线程），返回生效值供写盘。"""
 
-    def __init__(self, cfg_dict: dict, apply_cb) -> None:
+    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None) -> None:
         self._apply_cb = apply_cb
         self._cfg = dict(cfg_dict)
         self._capturing = False
-
-        W, H = 460, 560
+        self._preview_source = preview_image
+        self._preview_scale = float(cfg_dict.get("widget_scale", 1.0))
+        self._cards = {}
+        self._nav = {}
+        self._nav_images = {}
         self.root = tkinter.Toplevel()
         self.root.title("语音输入 设置")
-        self.root.overrideredirect(True)  # 无边框：自绘标题栏
+        self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.configure(bg=_BG)
-        self.root.geometry(f"{W}x{H}+160+120")
+        self.root.configure(bg=_CARD_EDGE, padx=1, pady=1)
+        width = min(920, self.root.winfo_screenwidth() - 64)
+        height = min(840, self.root.winfo_screenheight() - 80)
+        self.root.geometry(f"{width}x{height}+{max(0, (self.root.winfo_screenwidth() - width) // 2)}+40")
 
-        # 标题栏（可拖动）
-        tb = tkinter.Canvas(self.root, width=W, height=36, bg="#121926", highlightthickness=0)
+        shell = tkinter.Frame(self.root, bg=_BG)
+        shell.pack(fill="both", expand=True)
+        sidebar = tkinter.Frame(shell, bg=_SIDE, width=196)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        brand = tkinter.Frame(sidebar, bg=_SIDE)
+        brand.pack(fill="x", padx=24, pady=(32, 30))
+        tkinter.Label(brand, text="语音输入", bg=_SIDE, fg=_TEXT,
+                      font=(_FONT, -21, "bold")).pack(anchor="w")
+        tkinter.Label(brand, text="设置", bg=_SIDE, fg=_SUB,
+                      font=(_FONT, -13)).pack(anchor="w", pady=(5, 0))
+        for key, label in (("all", "常规"), ("hotkey", "快捷键"),
+                           ("appearance", "外观"), ("features", "识别与校对")):
+            self._nav_images[key] = _nav_icon(key)
+            button = tkinter.Button(
+                sidebar, text="  " + label, image=self._nav_images[key], compound="left",
+                anchor="w", font=(_FONT, -15),
+                bg=_SIDE, fg=_SUB, activebackground="#304A70", activeforeground=_TEXT,
+                relief="flat", bd=0, padx=14, pady=12, cursor="hand2",
+                command=lambda name=key: self._select_page(name),
+            )
+            button.pack(fill="x", padx=12, pady=3)
+            self._nav[key] = button
+        tkinter.Label(sidebar, text="voice2text\n本地识别 · 离线运行", justify="left",
+                      bg=_SIDE, fg=_SUB, font=(_FONT, -12)).pack(side="bottom", anchor="w", padx=24, pady=24)
+        tkinter.Frame(shell, bg=_CARD_EDGE, width=1).pack(side="left", fill="y")
+        main = tkinter.Frame(shell, bg=_BG)
+        main.pack(side="left", fill="both", expand=True)
+
+        tb = tkinter.Canvas(main, height=32, bg=_BG, highlightthickness=0)
         tb.pack(fill="x")
-        tb.create_text(16, 18, text="语音输入  设置", anchor="w", fill=_TEXT,
-                       font=("Microsoft YaHei UI", 10, "bold"))
-        cx = W - 22
-        tb.create_line(cx - 6, 12, cx + 6, 24, fill=_SUB, width=2)
-        tb.create_line(cx - 6, 24, cx + 6, 12, fill=_SUB, width=2)
-        tb.create_rectangle(cx - 12, 0, cx + 12, 36, fill="", outline="", tags="close")
-        tb.tag_bind("close", "<Button-1>", lambda e: self.root.destroy())
         self._tb = tb
+        self._tb_off = None
+        def titlebar(ev):
+            tb.delete("all")
+            cx = ev.width - 24
+            tb.create_line(cx - 5, 11, cx + 5, 21, fill=_SUB, width=1.5)
+            tb.create_line(cx - 5, 21, cx + 5, 11, fill=_SUB, width=1.5)
+            tb.create_rectangle(cx - 17, 0, cx + 17, 32, fill="", outline="", tags="close")
+            tb.tag_bind("close", "<Button-1>", lambda e: self._close())
+        tb.bind("<Configure>", titlebar)
         tb.bind("<ButtonPress-1>", self._tb_press)
         tb.bind("<B1-Motion>", self._tb_motion)
-        self._tb_off = None
+        heading = tkinter.Frame(main, bg=_BG)
+        heading.pack(fill="x", padx=28, pady=(0, 12))
+        self._heading = tkinter.Label(heading, text="常规", bg=_BG, fg=_TEXT, font=(_FONT, -24, "bold"))
+        self._heading.pack(anchor="w")
+        self._subtitle = tkinter.Label(heading, text="自定义语音输入的使用体验", bg=_BG, fg=_SUB, font=(_FONT, -13))
+        self._subtitle.pack(anchor="w", pady=(4, 0))
 
-        body = tkinter.Frame(self.root, bg=_BG)
-        body.pack(fill="both", expand=True, padx=18)
+        # 页脚固定在滚动区外，小屏幕也始终能保存或取消。
+        footer = tkinter.Frame(main, bg=_BG)
+        footer.pack(side="bottom", fill="x", padx=28, pady=16)
+        tkinter.Label(footer, text="更改将在保存后生效", bg=_BG, fg=_SUB,
+                      font=(_FONT, -12)).pack(side="left")
+        self._save_btn = tkinter.Button(footer, text="保存并应用", command=self._save,
+                       bg=_ACCENT, fg="#FFFFFF", activebackground="#70AEFF", activeforeground="#FFFFFF",
+                       relief="flat", bd=0, font=(_FONT, -14, "bold"), padx=22, pady=9, cursor="hand2")
+        self._save_btn.pack(side="right")
+        tkinter.Button(footer, text="取消", command=self._close, bg=_BG, fg=_SUB,
+                       activebackground=_CARD, activeforeground=_TEXT, relief="flat", bd=0,
+                       font=(_FONT, -14), padx=16, pady=9, cursor="hand2").pack(side="right", padx=(0, 8))
 
-        def section_title(text):
-            tkinter.Label(body, text=text, bg=_BG, fg=_TEXT,
-                          font=("Microsoft YaHei UI", 11, "bold")).pack(anchor="w", pady=(12, 6))
+        viewport = tkinter.Frame(main, bg=_BG)
+        viewport.pack(fill="both", expand=True, padx=(28, 16))
+        self._scroll = tkinter.Canvas(viewport, bg=_BG, highlightthickness=0)
+        bar = tkinter.Canvas(viewport, width=10, bg=_BG, highlightthickness=0)
+        bar.pack(side="right", fill="y")
+        self._scroll.pack(side="left", fill="both", expand=True)
+        def scrollbar(first, last):
+            bar.delete("all")
+            if float(last) - float(first) < 0.999:
+                h = bar.winfo_height()
+                bar.create_line(5, max(4, float(first) * h), 5, min(h - 4, float(last) * h),
+                                fill="#536987", width=4, capstyle="round")
+        def scroll_to(ev):
+            first, last = self._scroll.yview()
+            self._scroll.yview_moveto(ev.y / max(1, bar.winfo_height()) - (last - first) / 2)
+        bar.bind("<Button-1>", scroll_to)
+        bar.bind("<B1-Motion>", scroll_to)
+        bar.bind("<Configure>", lambda e: scrollbar(*self._scroll.yview()))
+        self._scroll.configure(yscrollcommand=scrollbar)
+        body = tkinter.Frame(self._scroll, bg=_BG)
+        item = self._scroll.create_window(0, 0, window=body, anchor="nw")
+        self._scroll.bind("<Configure>", lambda e: self._scroll.itemconfigure(item, width=e.width - 4))
+        body.bind("<Configure>", lambda e: self._scroll.configure(scrollregion=self._scroll.bbox("all")))
+        self.root.bind("<MouseWheel>", self._wheel)
 
-        def card(parent):
-            f = tkinter.Frame(parent, bg=_CARD, highlightbackground=_CARD_EDGE, highlightthickness=1)
-            return f
+        def card(key, title, subtitle):
+            panel = Card(body)
+            self._cards[key] = panel
+            content = panel.content
+            tkinter.Label(content, text=title, bg=_CARD, fg=_TEXT,
+                          font=(_FONT, -15, "bold")).pack(anchor="w")
+            if subtitle:
+                tkinter.Label(content, text=subtitle, bg=_CARD, fg=_SUB,
+                              font=(_FONT, -12)).pack(anchor="w", pady=(3, 8))
+            return content
 
-        # ---- 快捷键 ----
-        section_title("快捷键")
-        c1 = card(body)
-        c1.pack(fill="x")
-        tkinter.Label(c1, text="按下快捷键开始或停止语音输入", bg=_CARD, fg=_SUB,
-                      font=("Microsoft YaHei UI", 9)).pack(anchor="w", padx=16, pady=(12, 6))
+        c1 = card("hotkey", "快捷键", "按下快捷键，开始或停止语音输入")
         row = tkinter.Frame(c1, bg=_CARD)
-        row.pack(fill="x", padx=16, pady=(0, 14))
+        row.pack(fill="x", pady=(0, 2))
         self._hotkey_var = tkinter.StringVar(value=self._display_combo(self._cfg["hotkey"]))
         self._hotkey_entry = tkinter.Entry(
             row, textvariable=self._hotkey_var, state="readonly", readonlybackground=_TRACK,
-            fg=_TEXT, insertbackground=_TEXT, font=("Consolas", 11), relief="flat",
+            fg=_TEXT, insertbackground=_TEXT, font=(_FONT, -15), relief="flat",
+            highlightthickness=1, highlightbackground=_CARD_EDGE, highlightcolor=_ACCENT,
         )
-        self._hotkey_entry.pack(side="left", fill="x", expand=True, ipady=6)
+        self._hotkey_entry.pack(side="left", fill="x", expand=True, ipady=7)
         self._hotkey_btn = tkinter.Button(
-            row, text=" 修改 ", command=self._start_capture, bg="#2E3A4E", fg=_TEXT,
-            activebackground=_ACCENT, activeforeground="#fff", relief="flat",
-            font=("Microsoft YaHei UI", 9), bd=0, padx=16, pady=5, cursor="hand2",
+            row, text="修改", command=self._start_capture, bg="#304766", fg=_TEXT,
+            activebackground=_ACCENT, activeforeground="#FFFFFF", relief="flat",
+            font=(_FONT, -13), bd=0, padx=18, pady=8, cursor="hand2",
         )
         self._hotkey_btn.pack(side="left", padx=(10, 0))
 
-        # ---- 悬浮窗设置 ----
-        section_title("悬浮窗设置")
-        c2 = card(body)
-        c2.pack(fill="x")
-        tkinter.Label(c2, text="调整悬浮窗的大小与不透明度", bg=_CARD, fg=_SUB,
-                      font=("Microsoft YaHei UI", 9)).pack(anchor="w", padx=16, pady=(12, 4))
+        c2 = card("appearance", "悬浮窗设置", "调整大小与不透明度，在下方预览效果")
         self._scale_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_scale", 1.0)) * 100))
         self._opacity_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_opacity", 0.92)) * 100))
-        for label, var in (("窗口大小", self._scale_var), ("不透明度", self._opacity_var)):
+        self._sliders = []
+        self._percent_vars = []
+        for label, var, low, high in (("窗口大小", self._scale_var, 50, 150),
+                                      ("不透明度", self._opacity_var, 30, 100)):
             row = tkinter.Frame(c2, bg=_CARD)
-            row.pack(fill="x", padx=16, pady=6)
-            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=8, anchor="w",
-                          font=("Microsoft YaHei UI", 9)).pack(side="left")
-            Slider(row, var, w=230).pack(side="left", padx=6)
-            tkinter.Label(row, textvariable=var, bg=_CARD, fg=_SUB, width=5,
-                          font=("Consolas", 9)).pack(side="left")
-        tkinter.Frame(c2, bg=_CARD, height=12).pack()
+            row.pack(fill="x", pady=2)
+            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
+                          font=(_FONT, -13)).pack(side="left")
+            pct = tkinter.StringVar(value=f"{var.get():.0f}%")
+            self._percent_vars.append(pct)
+            tkinter.Label(row, textvariable=pct, bg=_CARD, fg=_SUB, width=5, anchor="e",
+                          font=(_FONT, -13)).pack(side="right")
+            slider = Slider(row, var, minimum=low, maximum=high)
+            slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
+            self._sliders.append(slider)
+            var.trace_add("write", lambda *_, v=var, text=pct: self._appearance_changed(v, text))
+        self._preview = tkinter.Canvas(c2, height=118, bg=_CARD, highlightthickness=0)
+        self._preview.pack(fill="x", pady=(6, 0))
+        self._preview.bind("<Configure>", lambda e: self._draw_preview())
 
-        # ---- 功能设置 ----
-        section_title("功能设置")
-        c3 = card(body)
-        c3.pack(fill="x")
+        c3 = card("features", "功能设置", "")
         self._proof_var = tkinter.BooleanVar(value=bool(self._cfg.get("proofread_enabled", True)))
         self._sound_var = tkinter.BooleanVar(value=bool(self._cfg.get("sound_cue", True)))
         self._autostart_var = tkinter.BooleanVar(value=get_autostart())
+        self._toggles = []
         for label, sub, var in (
-            ("开启二次校对", "语音输入停止后自动进行智能校对，提高准确率", self._proof_var),
-            ("录音时播放提示音", "开始和停止录音时播放提示音", self._sound_var),
-            ("开机自启动", "随系统启动，方便随时使用", self._autostart_var),
+            ("开启二次校对", "停止听写后，自动整理标点与语句", self._proof_var),
+            ("录音提示音", "开始和停止录音时播放提示音", self._sound_var),
+            ("开机自启动", "随系统启动，随时开始听写", self._autostart_var),
         ):
             row = tkinter.Frame(c3, bg=_CARD)
-            row.pack(fill="x", padx=16, pady=7)
-            Toggle(row, var).pack(side="left", padx=(0, 12))
+            row.pack(fill="x", pady=(7, 1))
+            value_label = tkinter.Label(row, text="开" if var.get() else "关", bg=_CARD,
+                                        fg=_SUB, width=2, font=(_FONT, -12))
+            value_label.pack(side="right", padx=(8, 0))
+            toggle = Toggle(row, var, command=lambda v=var, text=value_label: text.config(text="开" if v.get() else "关"))
+            toggle.pack(side="right", padx=(16, 0))
+            self._toggles.append(toggle)
             box = tkinter.Frame(row, bg=_CARD)
-            box.pack(side="left")
-            tkinter.Label(box, text=label, bg=_CARD, fg=_TEXT,
-                          font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w")
-            tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB,
-                          font=("Microsoft YaHei UI", 8)).pack(anchor="w")
-        tkinter.Frame(c3, bg=_CARD, height=8).pack()
+            box.pack(side="left", fill="x", expand=True)
+            tkinter.Label(box, text=label, bg=_CARD, fg=_TEXT, font=(_FONT, -14)).pack(anchor="w")
+            tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB, font=(_FONT, -12)).pack(anchor="w", pady=(2, 0))
+        self._select_page("all")
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.bind("<Escape>", lambda e: self._finish_capture(None) if self._capturing else self._close())
 
-        # 保存按钮（手绘圆角）
-        btn = tkinter.Canvas(body, width=140, height=36, bg=_BG, highlightthickness=0, cursor="hand2")
-        btn.pack(pady=16)
-        _rounded(btn, 0, 0, 139, 35, 18, fill=_ACCENT, outline="")
-        btn.create_text(70, 18, text="保存并应用", fill="#FFFFFF", font=("Microsoft YaHei UI", 10, "bold"))
-        btn.bind("<Button-1>", lambda e: self._save())
+    def _select_page(self, key: str) -> None:
+        titles = {"all": ("常规", "自定义语音输入的使用体验"),
+                  "hotkey": ("快捷键", "用顺手的组合键，随时开始听写"),
+                  "appearance": ("外观", "让悬浮窗适合你的桌面"),
+                  "features": ("识别与校对", "设置听写后的处理方式与启动偏好")}
+        self._heading.config(text=titles[key][0])
+        self._subtitle.config(text=titles[key][1])
+        for name, button in self._nav.items():
+            button.config(bg="#304A70" if name == key else _SIDE,
+                          fg=_TEXT if name == key else _SUB)
+        for name, panel in self._cards.items():
+            panel.pack_forget()
+            if key == "all" or name == key:
+                panel.pack(fill="x", pady=(0, 10))
+        self.root.update_idletasks()
+        self._scroll.configure(scrollregion=self._scroll.bbox("all"))
+        self._scroll.yview_moveto(0)
 
-        self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
+    def _wheel(self, ev) -> None:
+        bounds = self._scroll.bbox("all")
+        if bounds and bounds[3] > self._scroll.winfo_height():
+            self._scroll.yview_scroll(-int(ev.delta / 120), "units")
+
+    def _appearance_changed(self, var, text) -> None:
+        text.set(f"{var.get():.0f}%")
+        self._draw_preview()
+
+    def _draw_preview(self) -> None:
+        if not hasattr(self, "_preview"):
+            return
+        canvas = self._preview
+        canvas.delete("all")
+        w = max(1, canvas.winfo_width())
+        if self._preview_source is not None:
+            # 与实际悬浮窗共用同一帧，预览整体按 60% 展示，为最大尺寸留空间。
+            ratio = self._scale_var.get() / 100 / self._preview_scale * 0.6
+            source = self._preview_source
+            image = source.resize((max(1, round(source.width * ratio)), max(1, round(source.height * ratio))), Image.Resampling.LANCZOS)
+            image.putalpha(image.getchannel("A").point(lambda a: round(a * self._opacity_var.get() / 100)))
+            self._preview_photo = ImageTk.PhotoImage(image)
+            canvas.create_image(w // 2, 50, image=self._preview_photo)
+            caption = "外观预览（缩略）"
+        else:
+            caption = "保存后应用到悬浮窗"
+        canvas.create_text(w // 2, 107, text=caption, fill=_SUB, font=(_FONT, -11))
+
+    def _close(self) -> None:
+        if self._capturing:
+            self._finish_capture(None)
+        self.root.destroy()
 
     def _tb_press(self, ev) -> None:
         self._tb_off = (ev.x, ev.y)
@@ -294,9 +492,6 @@ class SettingsWindow:
             return
         self.root.geometry(f"+{self.root.winfo_x() + ev.x - self._tb_off[0]}"
                            f"+{self.root.winfo_y() + ev.y - self._tb_off[1]}")
-
-    def _card(self):
-        pass  # 兼容占位
 
     @staticmethod
     def _display_combo(combo: str) -> str:
@@ -308,7 +503,7 @@ class SettingsWindow:
         if self._capturing:
             return
         self._capturing = True
-        self._hotkey_btn.config(text="按下组合键…", bg=_ACCENT)
+        self._hotkey_btn.config(text="按组合键…", bg=_ACCENT)
         self._hotkey_entry.config(fg=_ACCENT)
         self._hotkey_var.set("")
 
@@ -319,17 +514,22 @@ class SettingsWindow:
                 if ev.keysym == "Escape":  # Esc 取消
                     self._finish_capture(None)
                     return "break"
-                self._finish_capture(_normalize_combo(ev))
+                combo = _normalize_combo(ev)
+                if combo:
+                    self._finish_capture(combo)
                 return "break"
             except tkinter.TclError:
                 return "break"  # 窗口已销毁（捕获中关窗），静默退出捕获态
 
-        self.root.bind_all("<Key>", capture_key, add="+")
+        self._capture_binding = self.root.bind("<Key>", capture_key, add="+")
+        self._hotkey_btn.focus_set()
 
     def _finish_capture(self, combo: str | None) -> None:
         self._capturing = False
-        self.root.unbind_all("<Key>")
-        self._hotkey_btn.config(text=" 修改 ", bg="#2E3A4E")
+        if getattr(self, "_capture_binding", None):
+            self.root.unbind("<Key>", self._capture_binding)
+            self._capture_binding = None
+        self._hotkey_btn.config(text="修改", bg="#304766")
         self._hotkey_entry.config(fg=_TEXT)
         if combo:
             self._cfg["hotkey"] = combo
