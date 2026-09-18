@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
+import ctypes
 import math
 import queue
 import tkinter
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+
+from voice2text import layered
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 96
@@ -93,18 +96,21 @@ class DictationWidget:
         self.root.title("voice2text")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", opacity)
-        self.root.attributes("-transparentcolor", KEY_COLOR)
         self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
         self.root.geometry(f"{self._w}x{self._h}+60+60")
+        self._opacity_pct = int(round(opacity * 255))
+        # 分层窗口（逐像素 alpha，边缘真平滑）；失败回退 transparentcolor + 整窗 alpha
+        self._layered = False
+        self._fallback_applied = False
 
-        self.canvas = tkinter.Canvas(self.root, width=self._w, height=self._h, bg=KEY_COLOR, highlightthickness=0)
+        self.canvas = tkinter.Canvas(self.root, width=self._w, height=self._h, bg="#10161F", highlightthickness=0)
         self.canvas.pack()
         self._photo = None
         self._hits: dict[str, tuple[int, int, int]] = {}  # kind -> (cx, cy, r)
         self._render()
         self._bind()
         self.root.deiconify()
+        self._init_layered()
         self._animate()
 
     @property
@@ -151,9 +157,9 @@ class DictationWidget:
         d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(151, 163, 180, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
-        gear_cx = int(w * 0.79 * SS)
-        div_x = int(w * 0.87 * SS)
-        close_cx = int(w * 0.94 * SS)
+        gear_cx = int(w * 0.775 * SS)
+        div_x = int(w * 0.855 * SS)
+        close_cx = int(w * 0.92 * SS)
         self._draw_gear(d, gear_cx, row_cy, int(7.5 * self._scale * SS), (151, 163, 180, 255))
         d.line([div_x, int(h * 0.20 * SS), div_x, int(h * 0.58 * SS)], fill=(67, 83, 107, 255), width=SS)
         r_x = int(7 * self._scale * SS)
@@ -199,9 +205,45 @@ class DictationWidget:
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)
         self._last_pil = small  # 测试/导出挂钩
+        self._sync_surface(small)
+
+    def _sync_surface(self, small: Image.Image) -> None:
+        """把渲染结果呈现到窗口：分层模式走 ULW（真逐像素 alpha），否则 Tk 贴图。"""
+        if self._layered:
+            if self._opacity_pct < 255:  # 整窗不透明度烘焙进 alpha 通道
+                a = small.getchannel("A").point(lambda v: v * self._opacity_pct // 255)
+                small = small.copy()
+                small.putalpha(a)
+            x, y = self.root.winfo_x(), self.root.winfo_y()
+            ok = layered.update(self._hwnd, small, x, y)
+            if not ok:  # ULW 中途失败（如休眠恢复）→ 回退贴图
+                self._use_fallback()
+            else:
+                return
         self._photo = ImageTk.PhotoImage(small)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+
+    def _init_layered(self) -> None:
+        """尝试启用逐像素 alpha 分层窗口。"""
+        self.root.update_idletasks()
+        try:
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            layered.enable(hwnd)
+            self._hwnd = hwnd
+            self._layered = True
+            self.root.bind("<Expose>", lambda e: self._sync_surface(self._last_pil) if self._last_pil else None)
+        except Exception:  # noqa: BLE001
+            self._use_fallback()
+
+    def _use_fallback(self) -> None:
+        """回退 transparentcolor + 整窗 alpha（有边缘损失，保功能）。"""
+        if self._fallback_applied:
+            return
+        self._fallback_applied = True
+        self._layered = False
+        self.root.attributes("-transparentcolor", KEY_COLOR)
+        self.root.attributes("-alpha", self._opacity_pct / 255)
 
     def _draw_mic(self, d: ImageDraw.ImageDraw, cx: int, cy: int, mr: int, color) -> None:
         u = mr / 12.0  # 设计单位（环半径=12）
@@ -269,6 +311,9 @@ class DictationWidget:
             self._drag_moved = True  # 超过阈值才算拖动，此前不挪窗（防 1-3px 抖动）
         if self._drag_moved:
             self.root.geometry(f"+{self.root.winfo_x() + dx}+{self.root.winfo_y() + dy}")
+            if self._layered and self._last_pil is not None:
+                layered.update(self._hwnd, self._last_pil,
+                               self.root.winfo_x(), self.root.winfo_y())
 
     def _on_release(self, ev) -> None:
         if not self._drag_moved and self._drag_off is not None:
@@ -310,7 +355,9 @@ class DictationWidget:
         """主线程调用：调整大小与透明度并重绘。"""
         self._scale = scale
         self._opacity = opacity
-        self.root.attributes("-alpha", opacity)
+        self._opacity_pct = int(round(opacity * 255))
+        if not self._layered:
+            self.root.attributes("-alpha", opacity)
         self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
         self.canvas.config(width=self._w, height=self._h)
         self.root.geometry(f"{self._w}x{self._h}")
