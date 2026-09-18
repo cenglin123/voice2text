@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-09-18
+
+### 修复：听写中途文字消失+输入法v模式面板
+
+#### 变更内容
+- 三缺陷叠加：热键Alt+V透传进输入法（改suppress=True）、合成Ctrl+V零间隔被IME拆散（键间加间隔+清修饰键）、停止时剪贴板恢复与最后一次粘贴竞态（join后延迟0.3s）。档案见 docs/problems/bugfix/ime-vmode-text-vanish.md
+
+---
+
 ## 2026-09-15
 
 ### 初始化文档体系

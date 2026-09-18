@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 
 import keyboard  # type: ignore[import-untyped]
 import pyperclip
@@ -196,5 +197,18 @@ class TextInserter:
             return True
 
     def _paste(self, text: str) -> None:
+        """剪贴板 + 合成 Ctrl+V。
+
+        键间必须留间隔：ASR/校对推理占 CPU 时，IME 的异步键盘钩子可能把
+        零间隔连发的 Ctrl 和 v 拆散——落单的 v 进入拼音组合框弹出 v 模式面板、
+        粘贴失败而退格已生效（实测 bug）。粘贴前先补发一次 ctrl keyup，
+        清掉任何可能卡住的修饰键状态。
+        """
         pyperclip.copy(text)
-        keyboard.press_and_release("ctrl+v")
+        keyboard.release("ctrl")
+        time.sleep(0.01)
+        keyboard.press("ctrl")
+        time.sleep(0.02)
+        keyboard.press_and_release("v")
+        time.sleep(0.02)
+        keyboard.release("ctrl")

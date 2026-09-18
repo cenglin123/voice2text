@@ -8,10 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-15 00:44
+> 最近重建：2026-09-18 19:22
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
+
+### bugfix（docs/problems/bugfix/）
+- [听写中途已识别文字全部消失并弹出输入法 v 模式面板](../../docs/problems/bugfix/ime-vmode-text-vanish.md) — fixed · high · active · 更新于 2026-09-18
 <!-- memory-index:end -->
 
 ## 记忆规则

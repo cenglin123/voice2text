@@ -23,7 +23,9 @@ class HotkeyListener:
         self._combo = combo
         self._toggle_event = threading.Event()
         self._last_press = threading.Event()
-        self._hook = keyboard.add_hotkey(combo, self._on_hotkey, suppress=False)
+        # suppress=True：吞掉 Alt+V，不再透传给焦点应用。中文输入法激活时，
+        # 透传的 v 会进入拼音组合框并弹出 v 模式面板（实测 bug），必须拦截。
+        self._hook = keyboard.add_hotkey(combo, self._on_hotkey, suppress=True)
 
     def _on_hotkey(self) -> None:
         self._last_press.set()

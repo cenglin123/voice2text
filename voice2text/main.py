@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sys
+import time
 
 from voice2text import __version__
 from voice2text.asr import ASRSessionWorker, StreamingASR
@@ -125,6 +126,7 @@ class DictationApp:
             if self._pr_worker.is_alive():
                 print("[警告] 校对线程未在预期内结束（残留线程会先排空旧队列，其迟到回调被会话代数拦截）")
             self._pr_worker = None
+        time.sleep(0.3)  # 等 App 异步消化最后一次 Ctrl+V，再恢复用户剪贴板（否则粘贴读到旧剪贴板）
         self._inserter.end_session()  # 关写入闸门 + 恢复用户剪贴板
         self._active = False
         print(f"[已停止] 本轮共 {len(self._locked_sentences)} 句")
