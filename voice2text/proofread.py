@@ -63,6 +63,15 @@ def chunk_sentences(sentences: list[str], max_chars: int = CHUNK_CHARS) -> list[
     return chunks
 
 
+PUNCT_SYSTEM_PROMPT = (
+    "你负责给中文句子添加标点符号。在合适的位置插入逗号、句号、问号等，"
+    "不得增加、删除或改写任何文字。只输出加标点后的句子。\n"
+    "示例：\n输入：我们明天上午九点在会议室碰头讨论一下方案\n输出：我们明天上午九点在会议室碰头，讨论一下方案。"
+)
+
+_NO_PUNCT = re.compile(r"[，。？！、；：,.?!《》“”\"'\s]+")
+
+
 class Proofreader:
     """加载 GGUF 并执行校对。Llama 实例非线程安全——用锁串行化。"""
 
@@ -78,25 +87,28 @@ class Proofreader:
     def proofread(self, text: str) -> str | None:
         """校对一块文本。返回校正文本；失败/可疑时返回 None（调用方保留原文）。
 
-        延迟控制：max_tokens 按输入长度收紧（中文≈1 token/字）。
-        照抄检测：小模型对"无语气词的长句"偶发原样照抄（实测 bug）——
-        原文无标点而结果与原文相同时，加温重试一次。
+        两段式：先清理（错字/语气词/顺句）；原文无标点而结果仍无标点时
+        （复合指令超出 1.7B 遵循度，实测），再走一次"只加标点"专责任务，
+        并校验去标点后文字与清理结果一致（防模型改字）。
         """
         text = text.strip()
         if not text:
             return None
-        result = self._generate(text, temperature=0.3)
-        if result is not None and result == text and not _HAS_PUNCT.search(text):
-            result = self._generate(text, temperature=0.8)  # 照抄了无标点原文：重试
+        result = self._generate(text, SYSTEM_PROMPT, temperature=0.3)
+        if result is not None and not _HAS_PUNCT.search(text) and not _HAS_PUNCT.search(result):
+            punctuated = self._generate(result, PUNCT_SYSTEM_PROMPT, temperature=0.3)
+            if punctuated is not None and _HAS_PUNCT.search(punctuated):
+                if _NO_PUNCT.sub("", punctuated) == _NO_PUNCT.sub("", result):
+                    result = punctuated
         return result
 
-    def _generate(self, text: str, temperature: float) -> str | None:
+    def _generate(self, text: str, system: str, temperature: float) -> str | None:
         max_tokens = min(512, len(text) * 3 + 64)
         try:
             with self._lock:
                 out = self._llm.create_chat_completion(
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": text + " " + _NO_THINK},
                     ],
                     max_tokens=max_tokens,

@@ -20,12 +20,12 @@ python -m venv .venv
 
 ### 最终用户
 
-- `install.bat`：一键安装，自包含——检测本机 Python 3.10+（识别并跳过 Windows Store 假别名），缺失则下载 Windows embeddable Python 到 runtime/；然后装依赖（llama-cpp-python 走 abetlen wheel 索引）+ 下载识别模型与校对 GGUF 到 models/
-- `run.bat`：启动常驻进程（热键生效）
+- `install.bat`：一键安装，自包含——检测本机 Python 3.10+（识别并跳过 Windows Store 假别名），缺失则下载 python-build-standalone 独立 CPython 到 runtime/（自带 tkinter，GUI 依赖）；然后装依赖（llama-cpp-python 走 abetlen wheel 索引）+ 下载识别模型与校对 GGUF 到 models/
+- `run.bat`：启动常驻进程（控制台 + 托盘 + 悬浮窗，热键生效）；`run_gui.pyw` 为无控制台入口（开机自启动用）
 
 ## 持久化与备份
 
-无用户数据持久化。`models/`（约 1.5–2GB）与 `runtime/`（embeddable Python，约 20MB 解压后 ~70MB）为可重建目录，删除后重跑 `install.bat` 可恢复。
+无用户数据持久化。`models/`（约 1.5–2GB）与 `runtime/`（python-build-standalone CPython，约 40MB 压缩 / ~130MB 解压）为可重建目录，删除后重跑 `install.bat` 可恢复。
 
 ## 部署陷阱
 

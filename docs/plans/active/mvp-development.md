@@ -121,9 +121,9 @@ created_at: 2026-09-15
   - reviewer 提出的阶段 5 评估项：Ctrl+V 注入后紧邻的剪贴板覆盖竞态（同锁串行已保证注入顺序，可考虑粘贴后小延时）
 
 ### 阶段 5：打磨 + 分发验证
-- **目标**：异常处理、系统托盘常驻 + 状态提示、中文 UTF-8 输出、临时文件清理、发行打包（含 wheel 随包）
-- **涉及文件**：voice2text/main.py、voice2text/tray.py、install.bat、docs/*
-- **关键实现约束**：新增依赖须更新 requirements.txt 并重验安装；发行包将 llama-cpp-python wheel 与模型下载脚本一起携带
+- **目标**：异常处理、系统托盘常驻 + 状态提示、中文 UTF-8 输出、临时文件清理、发行打包（含 wheel 随包）；按美术稿实现 GUI（托盘四状态图标、可拖动置顶悬浮窗、设置窗）
+- **涉及文件**：voice2text/main.py、voice2text/tray.py、voice2text/trayicon.py、voice2text/widget.py、voice2text/settings_window.py、install.bat、docs/*
+- **关键实现约束**：新增依赖须更新 requirements.txt 并重验安装；发行包将 llama-cpp-python wheel 与模型下载脚本一起携带；GUI 按美术稿气质实现、文字一律代码渲染（文生图中文不可用）
 - **验证标准**：
   1. 无 Python 的干净机器完整走 install → run → 记事本听写 → 校对替换 → 退出，全程可用
   2. 异常注入（拔麦克风/删模型目录/热键被占用）均有友好提示不崩溃
@@ -138,6 +138,8 @@ created_at: 2026-09-15
 
 ## 决策记录
 
+- 2026-09-18（GUI 实现）按用户提供的美术稿（assets/*.jpg）实现托盘+悬浮窗+设置窗：tkinter 标准库选型（零新增依赖；美术稿为深色扁平风可低成本还原）；文字一律代码渲染；交互重构为用户决策的"听写中只增不改、停止后统一校对"。
+- 2026-09-18（运行时切换）embeddable zip 与 nuget 包均不带 tkinter（后者实测），runtime 改用 python-build-standalone install_only 包（自带 tcl/tk，解压直得 runtime/python）；同时规避 cmd move 通配符不移动子目录的静默失败。
 - 2026-09-15：识别框架选 sherpa-onnx（原生流式、CPU 快、跨平台），校对模型选 Qwen3-1.7B Q4 GGUF + llama-cpp-python。详见 docs/overview.md「关键设计决策」。
 - 2026-09-15：上屏方案定为剪贴板粘贴（中文模拟键击会被输入法拦截），保存/恢复用户文本剪贴板。
 - 2026-09-15（审计修订）llama-cpp-python 的 PyPI 只有 sdist，Windows wheel 仅在作者索引 `https://abetlen.github.io/llama-cpp-python/whl/cpu/`（实测 0.3.35 有 `py3-none-win_amd64.whl`）。安装命令固定带 `--extra-index-url`，发行包直接随包携带 wheel。

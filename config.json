@@ -8,5 +8,9 @@
   "llm_model_path": "models/llm/Qwen3-1.7B-Q4_K_M.gguf",
   "debug_dump_wav": false,
   "non_editable_process_blacklist": [],
-  "input_clipboard": false
+  "input_clipboard": false,
+  "widget_scale": 1.0,
+  "widget_opacity": 0.92,
+  "sound_cue": true,
+  "autostart": false
 }

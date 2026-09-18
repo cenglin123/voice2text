@@ -58,6 +58,20 @@ class HotkeyListener:
     def clear_toggle(self) -> None:
         self._toggle_event.clear()
 
+    def rebind(self, combo: str) -> None:
+        """更换热键组合（设置窗口保存时调用）。失败时抛异常由调用方提示。"""
+        old = self._hook
+        self._hook = keyboard.add_hotkey(combo, self._on_hotkey, suppress=True)
+        self._combo = combo
+        try:
+            keyboard.remove_hotkey(old)
+        except (KeyError, ValueError):
+            pass
+
+    @property
+    def combo(self) -> str:
+        return self._combo
+
     def shutdown(self) -> None:
         try:
             keyboard.remove_hotkey(self._hook)

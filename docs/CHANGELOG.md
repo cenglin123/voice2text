@@ -17,6 +17,12 @@
 #### 变更内容
 - 用户报告 Win+V 剪贴板历史被 partial 刷屏。新默认路径：SendInput KEYEVENTF_UNICODE（VK_PACKET）字符直发光标处，不经剪贴板、绕过输入法；剪贴板+Ctrl+V 降级为 config.input_clipboard=true 兜底；剪贴板保存/恢复逻辑与停止延迟随之删除。App 级全链验证剪贴板零写入
 
+### GUI 实现：托盘+悬浮窗+设置窗（按美术稿）
+
+#### 变更内容
+- 按用户美术稿实现：trayicon 四状态图标（Pillow）、可拖动置顶悬浮窗（tkinter，三状态+声波动画+点击热键）、设置窗（快捷键捕获/缩放透明度/二次校对/提示音/开机自启动）；main 重构为 tkinter 主循环+tick 轮询模型。runtime 换 python-build-standalone（embeddable/nuget 均无 tkinter，实测）；修复 reviewer 的 move 通配符 blocker 与 NameError major。集成测试：状态机/统一校对/剪贴板零占用/设置回读全通过
+
+
 
 
 ---

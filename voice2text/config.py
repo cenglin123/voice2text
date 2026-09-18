@@ -21,6 +21,11 @@ DEFAULTS: dict = {
     # 文本上屏方式：默认 SendInput Unicode 注入（不经剪贴板，不污染剪贴板历史）；
     # 个别不认 VK_PACKET 字符的应用可改 true 回退剪贴板 + Ctrl+V 路径
     "input_clipboard": False,
+    # GUI（悬浮窗/托盘）
+    "widget_scale": 1.0,  # 悬浮窗缩放 0.5~1.5
+    "widget_opacity": 0.92,  # 悬浮窗不透明度 0.3~1.0
+    "sound_cue": True,  # 开始/停止听写提示音
+    "autostart": False,  # 开机自启动（实际状态以注册表为准，此处仅持久化 UI 选择）
     "non_editable_process_blacklist": [],
 }
 
@@ -36,6 +41,10 @@ class AppConfig:
     llm_model_path: Path
     debug_dump_wav: bool
     input_clipboard: bool
+    widget_scale: float
+    widget_opacity: float
+    sound_cue: bool
+    autostart: bool
     non_editable_process_blacklist: list = field(default_factory=list)
 
     def asr_file(self, name: str) -> Path:
@@ -72,6 +81,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         llm_model_path=_resolve(merged["llm_model_path"]),
         debug_dump_wav=bool(merged["debug_dump_wav"]),
         input_clipboard=bool(merged["input_clipboard"]),
+        widget_scale=float(merged["widget_scale"]),
+        widget_opacity=float(merged["widget_opacity"]),
+        sound_cue=bool(merged["sound_cue"]),
+        autostart=bool(merged["autostart"]),
         non_editable_process_blacklist=list(merged["non_editable_process_blacklist"]),
     )
 

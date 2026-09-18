@@ -42,27 +42,25 @@ if exist ".venv\Scripts\python.exe" (
     goto got_python
 )
 
-rem No usable Python: self-contained embeddable runtime
+rem No usable Python: self-contained full runtime (nuget package includes tkinter for the GUI)
 echo   No Python 3.10+ found, setting up embedded runtime ...
 if exist "runtime\python\python.exe" if exist "runtime\python\Lib\site-packages\pip" goto runtime_ready
 
 if not exist "runtime\python\python.exe" (
     where curl >nul 2>&1 || (echo   [FAIL] curl not found - please run on Windows 10 1803+ & goto fail)
     if not exist "runtime" mkdir runtime
-    curl -L --fail --retry 3 -o runtime_embed.zip https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip || curl -L --fail --retry 3 -o runtime_embed.zip https://mirrors.huaweicloud.com/python/3.11.9/python-3.11.9-embed-amd64.zip || (echo   [FAIL] cannot download embeddable Python & goto fail)
-    if not exist "runtime\python" mkdir "runtime\python"
-    tar -xf runtime_embed.zip -C "runtime\python" || (echo   [FAIL] cannot extract embeddable Python & goto fail)
-    rem ._pth isolated mode: enable site-packages and expose the project root,
-    rem otherwise cwd is NOT on sys.path and `import voice2text` fails
-    echo import site>> "runtime\python\python311._pth"
-    echo ..\..>> "runtime\python\python311._pth"
+    rem python-build-standalone 官方 CPython 独立包：自带 tkinter（embeddable zip 和 nuget 包都没有，GUI 跑不起来）
+    curl -L --fail --retry 3 -o runtime_py.tar.gz https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9+20240415-x86_64-pc-windows-msvc-shared-install_only.tar.gz || (echo   [FAIL] cannot download Python runtime & goto fail)
+    tar -xzf runtime_py.tar.gz -C "runtime" || (echo   [FAIL] cannot extract Python runtime & goto fail)
+    rem install_only 布局直接解出 runtime\python，无 ._pth，cwd 天然在 sys.path
+    del runtime_py.tar.gz 2>nul
 )
 
 rem pip bootstrap is re-runnable: a half-installed runtime (python.exe ok, pip missing) resumes here
 if exist "runtime\python\Lib\site-packages\pip" goto runtime_ready
 curl -L --fail -o get-pip.py https://bootstrap.pypa.io/get-pip.py || curl -L --fail -o get-pip.py https://mirrors.aliyun.com/pypi/get-pip.py || (echo   [FAIL] cannot download get-pip.py & goto fail)
 "runtime\python\python.exe" get-pip.py --no-warn-script-location || (echo   [FAIL] pip bootstrap failed & goto fail)
-del runtime_embed.zip get-pip.py 2>nul
+del runtime_py.tar.gz get-pip.py 2>nul
 
 :runtime_ready
 set "PY=runtime\python\python.exe"
@@ -84,7 +82,7 @@ echo [3/4] Downloading models (~1.4 GB total, resumable) ...
 if errorlevel 1 (echo   [FAIL] model download failed, check network and retry & goto fail)
 
 echo [4/4] Verifying installation ...
-"%PY%" -c "import voice2text, sherpa_onnx, llama_cpp, sounddevice, keyboard, uiautomation, pystray, pyperclip, pythoncom, win32clipboard; print('  all modules imported OK')"
+"%PY%" -c "import voice2text, sherpa_onnx, llama_cpp, sounddevice, keyboard, uiautomation, pystray, pyperclip, pythoncom, win32clipboard, tkinter; print('  all modules imported OK')"
 if errorlevel 1 (echo   [FAIL] module import failed & goto fail)
 
 echo.
