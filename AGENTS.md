@@ -78,7 +78,7 @@ Bugfix 任务（修复 / bug / 报错 / 异常等）必须先查索引段的 bug
 
 ## 测试要求
 
-暂无自动化测试套件。验证方式为手动功能验证：启动程序 → 在记事本中按 Alt+V 说话 → 确认流式上屏、停顿校对、再次 Alt+V 停止。后续若引入 pytest，测试命令写入本节并更新 README。
+悬浮窗验证：`python scripts/check_widget.py`（Windows，不加载模型）；截图选项见 README。听写链路手动验证：启动程序 → 在记事本中按 Alt+V 说话 → 确认流式上屏 → 再次 Alt+V 停止后统一校对。后续若引入 pytest，测试命令写入本节并更新 README。
 
 ## 安全与配置
 

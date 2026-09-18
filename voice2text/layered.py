@@ -7,6 +7,8 @@ transparentcolor 方案只有 1 位透明（边缘半透明像素会与魔法色
 from __future__ import annotations
 
 import ctypes
+import sys
+import winreg
 from ctypes import wintypes
 
 import numpy as np
@@ -62,8 +64,26 @@ class BITMAPINFOHEADER(ctypes.Structure):
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
+_user32.GetParent.argtypes = [wintypes.HWND]
+_user32.GetParent.restype = wintypes.HWND
+_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 _user32.GetWindowLongW.restype = ctypes.c_long
+_user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
 _user32.SetWindowLongW.restype = ctypes.c_long
+_user32.GetDC.argtypes = [wintypes.HWND]
+_user32.GetDC.restype = wintypes.HDC
+_user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+_gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+_gdi32.CreateCompatibleDC.restype = wintypes.HDC
+_gdi32.CreateDIBSection.argtypes = [
+    wintypes.HDC, ctypes.POINTER(BITMAPINFOHEADER), wintypes.UINT,
+    ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD,
+]
+_gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+_gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HANDLE]
+_gdi32.SelectObject.restype = wintypes.HANDLE
+_gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+_gdi32.DeleteDC.argtypes = [wintypes.HDC]
 _user32.UpdateLayeredWindow.argtypes = [
     wintypes.HWND, wintypes.HDC, ctypes.POINTER(POINT), ctypes.POINTER(SIZE),
     wintypes.HDC, ctypes.POINTER(POINT), wintypes.COLORREF,
@@ -72,10 +92,104 @@ _user32.UpdateLayeredWindow.argtypes = [
 _user32.UpdateLayeredWindow.restype = wintypes.BOOL
 
 
+class _AccentPolicy(ctypes.Structure):
+    _fields_ = [("state", ctypes.c_int), ("flags", ctypes.c_int),
+                ("color", wintypes.DWORD), ("animation", ctypes.c_int)]
+
+
+class _CompositionData(ctypes.Structure):
+    _fields_ = [("attribute", ctypes.c_int), ("data", ctypes.c_void_p),
+                ("size", ctypes.c_size_t)]
+
+
+class _HighContrast(ctypes.Structure):
+    _fields_ = [("size", wintypes.UINT), ("flags", wintypes.DWORD),
+                ("scheme", wintypes.LPWSTR)]
+
+
+_set_composition = getattr(_user32, "SetWindowCompositionAttribute", None)
+if _set_composition is not None:
+    _set_composition.argtypes = [wintypes.HWND, ctypes.POINTER(_CompositionData)]
+    _set_composition.restype = wintypes.BOOL
+_gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
+_gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
+_user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+_user32.SetWindowRgn.restype = ctypes.c_int
+_user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
+_user32.SystemParametersInfoW.restype = wintypes.BOOL
+
+
+def _accent(hwnd: int, state: int) -> bool:
+    if _set_composition is None:
+        return False
+    policy = _AccentPolicy(state, 0, 0, 0)
+    data = _CompositionData(19, ctypes.addressof(policy), ctypes.sizeof(policy))  # WCA_ACCENT_POLICY
+    return bool(_set_composition(hwnd, ctypes.byref(data)))
+
+
+def resize_blur(hwnd: int, width: int, height: int, radius: int) -> bool:
+    """约束系统模糊区域，避免圆角外出现矩形磨砂底；成功后区域归系统管理。"""
+    region = _gdi32.CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2)
+    if not region:
+        return False
+    if not _user32.SetWindowRgn(hwnd, region, True):
+        _gdi32.DeleteObject(region)
+        return False
+    return True
+
+
+def enable_blur(hwnd: int, width: int, height: int, radius: int) -> bool:
+    """使用系统合成器模糊背后窗口；不可用时保留普通分层绘制。
+
+    Windows 10 使用非公开但广泛采用的 ACCENT_ENABLE_BLURBEHIND；
+    不依赖 Windows 11 专属背景 API，不捕获或保存桌面内容。
+    """
+    if sys.getwindowsversion().major < 10 or _set_composition is None:
+        return False
+    if _user32.GetSystemMetrics(0x1000):  # SM_REMOTESESSION
+        return False
+    contrast = _HighContrast(ctypes.sizeof(_HighContrast), 0, None)
+    if not _user32.SystemParametersInfoW(0x42, contrast.size, ctypes.byref(contrast), 0):
+        return False
+    if contrast.flags & 1:  # HCF_HIGHCONTRASTON
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            if not winreg.QueryValueEx(key, "EnableTransparency")[0]:
+                return False
+    except OSError:
+        pass  # 未设置时采用系统默认开启
+    if not _accent(hwnd, 3):  # ACCENT_ENABLE_BLURBEHIND
+        return False
+    if not resize_blur(hwnd, width, height, radius):
+        disable_blur(hwnd)
+        return False
+    return True
+
+
+def disable_blur(hwnd: int) -> None:
+    """回退前清除背景效果和区域；正常销毁窗口时系统自动释放它们。"""
+    _accent(hwnd, 0)
+    _user32.SetWindowRgn(hwnd, None, True)
+
+
+def disable(hwnd: int) -> None:
+    """退出 ULW，允许 Tk 的 SetLayeredWindowAttributes 回退路径重新初始化。"""
+    disable_blur(hwnd)
+    ex = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED)
+
+
 def enable(hwnd: int) -> None:
     """给窗口加 WS_EX_LAYERED 扩展样式。"""
     ex = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED)
+
+
+def window_handle(tk_id: int) -> int:
+    """取得 Tk 外层原生窗口，明确使用指针宽度的 HWND 签名。"""
+    return _user32.GetParent(tk_id) or tk_id
 
 
 def update(hwnd: int, img_rgba, x: int, y: int) -> bool:
@@ -90,24 +204,37 @@ def update(hwnd: int, img_rgba, x: int, y: int) -> bool:
     raw = arr[..., [2, 1, 0, 3]].astype(np.uint8).tobytes()  # RGBA → BGRA（仅交换 R/B）
 
     hdc_screen = _user32.GetDC(None)
+    if not hdc_screen:
+        return False
     hdc_mem = _gdi32.CreateCompatibleDC(hdc_screen)
-    ptr = ctypes.c_void_p()
-    bmi = BITMAPINFOHEADER(w, h)
-    hbmp = _gdi32.CreateDIBSection(hdc_screen, ctypes.byref(bmi), 0, ctypes.byref(ptr), None, 0)
-    ok = False
-    if hbmp and ptr:
+    if not hdc_mem:
+        _user32.ReleaseDC(None, hdc_screen)
+        return False
+    hbmp = None
+    prev = None
+    try:
+        ptr = ctypes.c_void_p()
+        bmi = BITMAPINFOHEADER(w, h)
+        hbmp = _gdi32.CreateDIBSection(hdc_screen, ctypes.byref(bmi), 0, ctypes.byref(ptr), None, 0)
+        if not hbmp or not ptr:
+            return False
         ctypes.memmove(ptr, raw, len(raw))
         prev = _gdi32.SelectObject(hdc_mem, hbmp)
+        if not prev or prev == ctypes.c_void_p(-1).value:
+            prev = None
+            return False
         blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
         dst = POINT(x, y)
         size = SIZE(w, h)
         src = POINT(0, 0)
-        ok = bool(_user32.UpdateLayeredWindow(
+        return bool(_user32.UpdateLayeredWindow(
             hwnd, hdc_screen, ctypes.byref(dst), ctypes.byref(size),
             hdc_mem, ctypes.byref(src), 0, ctypes.byref(blend), ULW_ALPHA,
         ))
-        _gdi32.SelectObject(hdc_mem, prev)
-        _gdi32.DeleteObject(hbmp)
-    _gdi32.DeleteDC(hdc_mem)
-    _user32.ReleaseDC(None, hdc_screen)
-    return ok
+    finally:
+        if prev:
+            _gdi32.SelectObject(hdc_mem, prev)
+        if hbmp:
+            _gdi32.DeleteObject(hbmp)
+        _gdi32.DeleteDC(hdc_mem)
+        _user32.ReleaseDC(None, hdc_screen)

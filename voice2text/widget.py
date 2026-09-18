@@ -1,7 +1,7 @@
-"""悬浮窗：置顶、可拖动的药丸形状态窗（美术稿 assets/悬浮窗-*.jpg）。
+"""悬浮窗：置顶、可拖动的圆角磨砂状态窗（美术稿 assets/悬浮窗-*.jpg）。
 
 渲染：整面板用 Pillow 以 3x 超采样绘制再缩小（抗锯齿），tkinter 只负责贴图与
-事件；听写中的声波动画按 ~90ms 重绘。圆角外用 transparentcolor 透视。
+事件；系统合成器实时模糊背后内容，失败回退深蓝渐变。声波按 ~90ms 重绘。
 
 状态：idle 待命 / loading 模型加载 / listening 聆听 / proofreading 校对 / error 不可用。
 线程约定：公开方法须在主线程调用；工作线程经 ui_queue 传 ("state", s) 由 pump 应用。
@@ -20,6 +20,7 @@ from voice2text import layered
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 104
+CORNER_RADIUS = 22
 SS = 3  # 超采样倍数
 
 # 美术稿取色
@@ -30,7 +31,7 @@ TEXT_PRIMARY = "#F4F7FC"
 TEXT_SECONDARY = "#97A3B4"
 IDLE_RING = (148, 161, 178)
 IDLE_MIC = (232, 238, 246)
-LISTEN = (255, 84, 74)
+LISTEN = (255, 99, 95)
 PROOF = (86, 168, 255)
 LOADING = (152, 165, 179)
 ERROR = (138, 148, 162)
@@ -101,6 +102,7 @@ class DictationWidget:
         self._opacity_pct = int(round(opacity * 255))
         # 分层窗口（逐像素 alpha，边缘真平滑）；失败回退 transparentcolor + 整窗 alpha
         self._layered = False
+        self._glass = False
         self._fallback_applied = False
 
         self.canvas = tkinter.Canvas(self.root, width=self._w, height=self._h, bg="#10161F", highlightthickness=0)
@@ -128,12 +130,13 @@ class DictationWidget:
         W, H = w * SS, h * SS
         img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        R = H // 2 - 1
+        R = round(CORNER_RADIUS * self._scale * SS)
 
-        # 背景：垂直渐变药丸 + 边缘描边 + 顶部高光
+        # 原生模糊之上的深蓝透光层；回退模式使用不透明渐变。
         for y in range(H):
             t = y / H
-            d.line([0, y, W, y], fill=(*_lerp(BG_TOP, BG_BOTTOM, t), 255))
+            alpha = round(150 + 40 * t) if self._glass else 255
+            d.line([0, y, W, y], fill=(*_lerp(BG_TOP, BG_BOTTOM, t), alpha))
         mask = Image.new("L", (W, H), 0)
         ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=R, fill=255)
         pill = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -145,30 +148,32 @@ class DictationWidget:
         accent255 = (*accent, 255)
 
         # 左上：品牌格点 + 标题（与右侧按钮同一水平线）
-        row_cy = int(h * 0.27 * SS)
-        gx = int(w * 0.065 * SS)
-        gs = int(3.5 * self._scale * SS)
-        gap = gs + int(3 * self._scale * SS)
-        gy = row_cy - gap - int(1 * SS)
+        unit = self._scale * SS
+        row_cy = round(23 * unit)
+        gx = round(21 * unit)
+        gs = round(4 * unit)
+        gap = round(6 * unit)
+        gy = row_cy - (gap + gs) // 2
         for dx in (0, 1):
             for dy in (0, 1):
-                d.rectangle(
+                d.rounded_rectangle(
                     [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
-                    fill=(178, 190, 206, 255),
+                    radius=max(1, round(unit)), fill=(170, 184, 204, 255),
                 )
-        f_title = _font(int(10.5 * self._scale * SS))
-        title_y = gy - int(2 * SS)
-        d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(178, 190, 206, 255))
+        f_title = _font(round(11 * unit))
+        d.text((round(39 * unit), row_cy), "语音输入", anchor="lm",
+               font=f_title, fill=(185, 198, 218, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
-        gear_cx = int(w * 0.765 * SS)
-        div_x = int(w * 0.845 * SS)
-        close_cx = int(w * 0.90 * SS)
-        self._draw_gear(d, gear_cx, row_cy, int(7.5 * self._scale * SS), (151, 163, 180, 255))
-        d.line([div_x, int(h * 0.22 * SS), div_x, int(h * 0.52 * SS)], fill=(67, 83, 107, 255), width=SS)
-        r_x = int(7 * self._scale * SS)
-        d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
-        d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
+        gear_cx = round(273 * unit)
+        div_x = round(293 * unit)
+        close_cx = round(313 * unit)
+        self._draw_gear(d, gear_cx, row_cy, round(7 * unit), (170, 184, 204, 255))
+        d.line([div_x, row_cy - 8 * unit, div_x, row_cy + 8 * unit],
+               fill=(67, 83, 107, 200), width=max(1, round(unit)))
+        r_x = round(5 * unit)
+        d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(178, 190, 206, 255), width=max(1, round(1.2 * unit)))
+        d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(178, 190, 206, 255), width=max(1, round(1.2 * unit)))
         # 命中区（最终像素坐标）
         self._hits = {
             "gear": (gear_cx // SS, row_cy // SS, int(16 * self._scale)),
@@ -176,18 +181,18 @@ class DictationWidget:
         }
 
         # 中央：麦克风圆环 + 麦克风
-        mr = int(h * 0.30 * SS)
-        mcx, mcy = W // 2, int(H * 0.40)
-        d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 255))
-        ring_w = int(1.6 * SS) if self._state in ("idle", "loading") else int(2.4 * SS)
+        mr = round(26 * unit)
+        mcx, mcy = W // 2, round(46 * unit)
+        d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 155 if self._glass else 255))
+        ring_w = max(1, round((1.2 if self._state in ("idle", "loading") else 1.6) * unit))
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
         self._hits["mic"] = (mcx // SS, mcy // SS, int(mr / SS * 1.2))
-        self._draw_mic(d, mcx, mcy, mr, accent255)
+        self._draw_mic(d, mcx, mcy, mr, (*IDLE_MIC, 255) if self._state == "idle" else accent255)
 
         # 声波（聆听）或旋转指示（校对/加载）
         if self._state == "listening":
             heights = self._wave_heights(mr)
-            bar_w = int(4 * self._scale * SS)
+            bar_w = max(2, round(2.5 * unit))
             for i, hh in enumerate(heights):
                 x = mcx - mr - int(10 * self._scale * SS) - i * int(8 * self._scale * SS)
                 fade = 1 - i * 0.12
@@ -201,10 +206,9 @@ class DictationWidget:
                   fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        f_status = _font(int(10 * self._scale * SS))
+        f_status = _font(round(11 * unit))
         text = STATUS_TEXT.get(self._state, "")
-        tw = d.textlength(text, font=f_status)
-        d.text(((W - tw) / 2, int(H * 0.78)), text, font=f_status, fill=(232, 237, 244, 255))
+        d.text((W / 2, round(86 * unit)), text, anchor="mm", font=f_status, fill=(232, 237, 244, 255))
 
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)
@@ -222,6 +226,7 @@ class DictationWidget:
             ok = layered.update(self._hwnd, small, x, y)
             if not ok:  # ULW 中途失败（如休眠恢复）→ 回退贴图
                 self._use_fallback()
+                return  # 回退已按不透明底重新渲染，不能再覆盖为当前透光帧
             else:
                 return
         self._photo = ImageTk.PhotoImage(small)
@@ -232,11 +237,14 @@ class DictationWidget:
         """尝试启用逐像素 alpha 分层窗口。"""
         self.root.update_idletasks()
         try:
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            hwnd = layered.window_handle(self.root.winfo_id())
             layered.enable(hwnd)
             self._hwnd = hwnd
             self._layered = True
-            self.root.bind("<Expose>", lambda e: self._sync_surface(self._last_pil) if self._last_pil else None)
+            self._glass = layered.enable_blur(hwnd, self._w, self._h,
+                                              round(CORNER_RADIUS * self._scale))
+            # ULW 自行保留表面。Expose 时重贴旧尺寸会覆盖尚在处理的 Tk geometry。
+            self._render()
         except Exception:  # noqa: BLE001
             self._use_fallback()
 
@@ -245,32 +253,37 @@ class DictationWidget:
         if self._fallback_applied:
             return
         self._fallback_applied = True
+        if hasattr(self, "_hwnd"):
+            layered.disable(self._hwnd)
         self._layered = False
+        self._glass = False
         self.root.attributes("-transparentcolor", KEY_COLOR)
         self.root.attributes("-alpha", self._opacity_pct / 255)
+        self._render()
 
     def _draw_mic(self, d: ImageDraw.ImageDraw, cx: int, cy: int, mr: int, color) -> None:
-        u = mr / 11.5  # 设计单位
-        cap_w, cap_h = 4.8 * u, 7.2 * u
+        u = mr / 19  # 麦克风占圆环约 60%，留足环内呼吸空间
+        cap_w, cap_h = 3.5 * u, 6 * u
         d.rounded_rectangle(
-            [cx - cap_w, cy - 9.5 * u, cx + cap_w, cy - 9.5 * u + 2 * cap_h],
+            [cx - cap_w, cy - 11 * u, cx + cap_w, cy - 11 * u + 2 * cap_h],
             radius=cap_w, fill=color,
         )
-        d.arc([cx - 7 * u, cy - 6 * u, cx + 7 * u, cy + 8 * u], start=25, end=155,
+        d.arc([cx - 6.5 * u, cy - 6 * u, cx + 6.5 * u, cy + 7 * u], start=0, end=180,
               fill=color, width=max(1, int(1.6 * u)))
-        d.line([cx, cy + 8 * u, cx, cy + 10.5 * u], fill=color, width=max(1, int(1.6 * u)))
-        d.rounded_rectangle([cx - 4.2 * u, cy + 10.5 * u, cx + 4.2 * u, cy + 12 * u],
-                            radius=1.5 * u, fill=color)
+        d.line([cx, cy + 7 * u, cx, cy + 10.5 * u], fill=color, width=max(1, int(1.6 * u)))
+        d.rounded_rectangle([cx - 3.5 * u, cy + 10 * u, cx + 3.5 * u, cy + 11.5 * u],
+                            radius=u, fill=color)
 
     def _draw_gear(self, d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, color) -> None:
-        d.ellipse([cx - r + 2 * SS, cy - r + 2 * SS, cx + r - 2 * SS, cy + r - 2 * SS], outline=color, width=SS)
-        for k in range(6):
-            a = math.pi * k / 3
-            d.line(
-                [cx + (r - SS) * math.cos(a), cy + (r - SS) * math.sin(a),
-                 cx + r * math.cos(a), cy + r * math.sin(a)],
-                fill=color, width=SS,
-            )
+        points = []
+        for k in range(48):
+            a = math.tau * k / 48
+            rr = r if k % 6 in (1, 2, 3, 4) else r * 0.78
+            points.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
+        width = max(1, round(self._scale * SS))
+        d.line(points + [points[0]], fill=color, width=width, joint="curve")
+        inner = r * 0.32
+        d.ellipse([cx - inner, cy - inner, cx + inner, cy + inner], outline=color, width=width)
 
     def _wave_heights(self, mr: int) -> list[int]:
         base = mr * 0.18
@@ -315,9 +328,9 @@ class DictationWidget:
             self._drag_moved = True  # 超过阈值才算拖动，此前不挪窗（防 1-3px 抖动）
         if self._drag_moved:
             self.root.geometry(f"+{self.root.winfo_x() + dx}+{self.root.winfo_y() + dy}")
+            self.root.update_idletasks()  # 先落实位置，否则 ULW 会用旧坐标撤销移动
             if self._layered and self._last_pil is not None:
-                layered.update(self._hwnd, self._last_pil,
-                               self.root.winfo_x(), self.root.winfo_y())
+                self._sync_surface(self._last_pil)
 
     def _on_release(self, ev) -> None:
         if not self._drag_moved and self._drag_off is not None:
@@ -365,6 +378,12 @@ class DictationWidget:
         self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
         self.canvas.config(width=self._w, height=self._h)
         self.root.geometry(f"{self._w}x{self._h}")
+        self.root.update_idletasks()
+        if self._glass:
+            if not layered.resize_blur(self._hwnd, self._w, self._h,
+                                       round(CORNER_RADIUS * self._scale)):
+                layered.disable_blur(self._hwnd)
+                self._glass = False
         self._render()
 
     def run_tick(self, tick, interval_ms: int = 150) -> None:

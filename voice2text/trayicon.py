@@ -23,9 +23,9 @@ _TRANSPARENT = (0, 0, 0, 0)
 
 def draw_icon(state: str = "idle", size: int = 64) -> Image.Image:
     """绘制指定状态的托盘图标。size 为边长（正方形）。"""
-    img = Image.new("RGBA", (size, size), _TRANSPARENT)
+    img = Image.new("RGBA", (size * 4, size * 4), _TRANSPARENT)
     d = ImageDraw.Draw(img)
-    s = size / 64.0  # 按 64 设计稿缩放
+    s = size * 4 / 64.0  # 超采样后缩小，16/20px 托盘也保留平滑轮廓
 
     color = {
         "idle": COLOR_IDLE,
@@ -34,36 +34,28 @@ def draw_icon(state: str = "idle", size: int = 64) -> Image.Image:
         "error": COLOR_ERROR,
     }.get(state, COLOR_IDLE)
 
-    lw = max(2, round(4 * s))
+    lw = max(2, round(6 * s))
     # 麦克风主体：胶囊形
-    d.rounded_rectangle([26 * s, 10 * s, 38 * s, 34 * s], radius=6 * s, fill=color)
+    d.rounded_rectangle([22 * s, 5 * s, 42 * s, 36 * s], radius=10 * s, fill=color)
     # U 形支架（下半圆弧）
-    d.arc([20 * s, 16 * s, 44 * s, 42 * s], start=15, end=165, fill=color, width=lw)
+    d.arc([13 * s, 14 * s, 51 * s, 49 * s], start=0, end=180, fill=color, width=lw)
     # 杆 + 底座
-    d.line([32 * s, 42 * s, 32 * s, 48 * s], fill=color, width=lw)
-    d.rounded_rectangle([24 * s, 48 * s, 40 * s, 53 * s], radius=2 * s, fill=color)
+    d.line([32 * s, 47 * s, 32 * s, 56 * s], fill=color, width=lw)
+    d.rounded_rectangle([21 * s, 54 * s, 43 * s, 60 * s], radius=3 * s, fill=color)
 
     if state == "listening":
         # 两侧声波（弧线）；坐标均为 64 设计稿单位，使用处统一乘 s
-        for k, r in enumerate((3, 7)):
-            x0 = 12 - k * 4
-            d.arc(
-                [x0 * s, (24 - r) * s, (x0 + 2 * r) * s, (24 + r) * s],
-                start=70, end=290, fill=color, width=max(2, round(2.5 * s)),
-            )
-            x1 = 52 + k * 4
-            d.arc(
-                [(x1 - 2 * r) * s, (24 - r) * s, x1 * s, (24 + r) * s],
-                start=250, end=470, fill=color, width=max(2, round(2.5 * s)),
-            )
+        # 小尺寸仅保留一组粗声波，避免多重细弧缩小后粘连。
+        d.arc([3 * s, 14 * s, 17 * s, 44 * s], 110, 250, fill=color, width=round(4 * s))
+        d.arc([47 * s, 14 * s, 61 * s, 44 * s], -70, 70, fill=color, width=round(4 * s))
     elif state == "recording":
         # 右上角圆点
-        d.ellipse([44 * s, 8 * s, 54 * s, 18 * s], fill=COLOR_RECORD)
+        d.ellipse([48 * s, 3 * s, 61 * s, 16 * s], fill=COLOR_RECORD)
     elif state == "error":
         # 斜杠
-        d.line([14 * s, 50 * s, 50 * s, 14 * s], fill=color, width=lw)
+        d.line([9 * s, 55 * s, 55 * s, 9 * s], fill=color, width=lw)
 
-    return img
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def icon_bytes(state: str = "idle", size: int = 64) -> bytes:

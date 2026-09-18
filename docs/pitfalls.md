@@ -32,3 +32,5 @@
 - **embeddable zip 与 nuget 包都不带 tkinter**：GUI 依赖 tkinter，两者装出来 import 即败（nuget 包连 tcl/tk 目录都没有，实测）。规避：runtime 用 python-build-standalone 的 install_only 包（自带 tcl/tk，解压即得 runtime/python）。
 - **cmd 的 move 通配符不移动子目录**：`move dir\* dest` 只搬顶层文件且返回 0（静默失败）。规避：整目录 rename 或 robocopy /E /MOVE。
 - **pythonw 下 sys.stdout/stderr 为 None**：任何 print 都会 AttributeError。规避：main() 入口把 None 的标准流重定向到 devnull。
+- **Tk geometry 与 ULW 位置竞争**：Tk 的 geometry 变更尚未处理时，ULW 读取旧坐标重绘可撤销移动；先 update_idletasks 再呈现。ULW 自行保留窗口表面，不在 Expose 中重贴旧帧。拖动仍须通过同一透明度处理路径。
+- **原生模糊不遵循 ULW 透明像素轮廓**：只给像素 alpha 裁圆角会在四角留下矩形模糊底；须同步 SetWindowRgn。成功后 HRGN 归系统所有，失败由调用方释放，回退时清除区域与模糊。

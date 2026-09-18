@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-18 22:53
+> 最近重建：2026-09-18 23:11
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [悬浮窗拖动时 ULW 旧坐标撤销 Tk 移动](../../docs/problems/bugfix/widget-drag-position.md) — fixed · medium · active · 更新于 2026-09-18
 - [设置快捷键时按下修饰键立即退出捕获](../../docs/problems/bugfix/settings-modifier-capture.md) — fixed · medium · active · 更新于 2026-09-18
 - [设置页缩放滑条无法达到配置支持的范围](../../docs/problems/bugfix/settings-slider-range.md) — fixed · low · active · 更新于 2026-09-18
 - [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-18
