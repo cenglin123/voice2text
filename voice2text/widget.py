@@ -135,10 +135,10 @@ class DictationWidget:
         accent255 = (*accent, 255)
 
         # 左上：品牌格点 + 标题（与右侧按钮同一水平线）
-        row_cy = int(h * 0.28 * SS)
+        row_cy = int(h * 0.25 * SS)
         gx = int(w * 0.05 * SS)
-        gs = int(4.5 * self._scale * SS)
-        gap = gs + int(3.5 * self._scale * SS)
+        gs = int(3.5 * self._scale * SS)
+        gap = gs + int(3 * self._scale * SS)
         gy = row_cy - gap - int(1 * SS)
         for dx in (0, 1):
             for dy in (0, 1):
@@ -146,17 +146,17 @@ class DictationWidget:
                     [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
                     fill=(151, 163, 180, 255),
                 )
-        f_title = _font(int(11 * self._scale * SS))
-        title_y = gy - int(3 * SS)
+        f_title = _font(int(9.5 * self._scale * SS))
+        title_y = gy - int(2 * SS)
         d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(151, 163, 180, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
         gear_cx = int(w * 0.79 * SS)
         div_x = int(w * 0.87 * SS)
         close_cx = int(w * 0.94 * SS)
-        self._draw_gear(d, gear_cx, row_cy, int(9 * self._scale * SS), (151, 163, 180, 255))
+        self._draw_gear(d, gear_cx, row_cy, int(7.5 * self._scale * SS), (151, 163, 180, 255))
         d.line([div_x, int(h * 0.20 * SS), div_x, int(h * 0.58 * SS)], fill=(67, 83, 107, 255), width=SS)
-        r_x = int(8 * self._scale * SS)
+        r_x = int(7 * self._scale * SS)
         d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
         d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
         # 命中区（最终像素坐标）
@@ -166,8 +166,8 @@ class DictationWidget:
         }
 
         # 中央：麦克风圆环 + 麦克风
-        mr = int(h * 0.32 * SS)
-        mcx, mcy = W // 2, int(H * 0.42)
+        mr = int(h * 0.26 * SS)
+        mcx, mcy = W // 2, int(H * 0.38)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 255))
         ring_w = int(1.2 * SS) if self._state in ("idle", "loading") else int(1.8 * SS)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
@@ -179,11 +179,11 @@ class DictationWidget:
             heights = self._wave_heights(mr)
             bar_w = int(3 * self._scale * SS)
             for i, hh in enumerate(heights):
-                x = mcx - mr - int(12 * self._scale * SS) - i * int(9 * self._scale * SS)
+                x = mcx - mr - int(10 * self._scale * SS) - i * int(8 * self._scale * SS)
                 fade = 1 - i * 0.16
                 col = tuple(round(c * fade) for c in LISTEN) + (255,)
                 d.rounded_rectangle([x - bar_w // 2, mcy - hh, x + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
-                x2 = mcx + mr + int(12 * self._scale * SS) + i * int(9 * self._scale * SS)
+                x2 = mcx + mr + int(10 * self._scale * SS) + i * int(8 * self._scale * SS)
                 d.rounded_rectangle([x2 - bar_w // 2, mcy - hh, x2 + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
         elif self._state in ("proofreading", "loading"):
             start_a = (self._phase * 240) % 360
@@ -191,10 +191,10 @@ class DictationWidget:
                   fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        f_status = _font(int(10.5 * self._scale * SS))
+        f_status = _font(int(9.5 * self._scale * SS))
         text = STATUS_TEXT.get(self._state, "")
         tw = d.textlength(text, font=f_status)
-        d.text(((W - tw) / 2, int(H * 0.76)), text, font=f_status, fill=(232, 237, 244, 255))
+        d.text(((W - tw) / 2, int(H * 0.80)), text, font=f_status, fill=(232, 237, 244, 255))
 
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)
@@ -205,13 +205,11 @@ class DictationWidget:
 
     def _draw_mic(self, d: ImageDraw.ImageDraw, cx: int, cy: int, mr: int, color) -> None:
         u = mr / 12.0  # 设计单位（环半径=12）
-        cap_w, cap_h = 5.2 * u, 7.0 * u
+        cap_w, cap_h = 4.8 * u, 7.2 * u
         d.rounded_rectangle(
-            [cx - cap_w, cy - 9 * u, cx + cap_w, cy - 9 * u + 2 * cap_h],
+            [cx - cap_w, cy - 9.5 * u, cx + cap_w, cy - 9.5 * u + 2 * cap_h],
             radius=cap_w, fill=color,
         )
-        d.line([cx - 3.4 * u, cy - 3.6 * u, cx + 3.4 * u, cy - 3.6 * u], fill=(30, 40, 56, 255), width=max(1, int(u)))
-        d.line([cx - 3.4 * u, cy - 1.4 * u, cx + 3.4 * u, cy - 1.4 * u], fill=(30, 40, 56, 255), width=max(1, int(u)))
         d.arc([cx - 7 * u, cy - 6 * u, cx + 7 * u, cy + 8 * u], start=25, end=155,
               fill=color, width=max(1, int(1.6 * u)))
         d.line([cx, cy + 8 * u, cx, cy + 10.5 * u], fill=color, width=max(1, int(1.6 * u)))
@@ -220,10 +218,10 @@ class DictationWidget:
 
     def _draw_gear(self, d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, color) -> None:
         d.ellipse([cx - r + 2 * SS, cy - r + 2 * SS, cx + r - 2 * SS, cy + r - 2 * SS], outline=color, width=SS)
-        for k in range(8):
-            a = math.pi * k / 4
+        for k in range(6):
+            a = math.pi * k / 3
             d.line(
-                [cx + (r - 2 * SS) * math.cos(a), cy + (r - 2 * SS) * math.sin(a),
+                [cx + (r - SS) * math.cos(a), cy + (r - SS) * math.sin(a),
                  cx + r * math.cos(a), cy + r * math.sin(a)],
                 fill=color, width=SS,
             )
