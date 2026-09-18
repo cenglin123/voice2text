@@ -75,6 +75,7 @@ class DictationApp:
         self._active = False
         self._busy = False  # 启动/停止进行中，忽略新的切换请求
         self.apply_settings_scale: tuple[float, float] | None = None  # 设置保存后待应用的外观
+        self._models_ready = threading.Event()  # 预加载完成（成功与否都置位）
 
     @property
     def active(self) -> bool:
@@ -85,13 +86,38 @@ class DictationApp:
 
     # ---- 启动 / 停止（后台线程执行）----
 
+    def preload_models(self) -> None:
+        """启动即后台加载识别/校对模型（悬浮窗显示"加载中"，首次听写零等待）。"""
+        def _load() -> None:
+            try:
+                self._asr = StreamingASR(self._cfg)
+                print("  （后台加载识别模型完成）")
+                if self._cfg.proofread_enabled:
+                    try:
+                        self._proofreader = Proofreader(self._cfg)
+                        print("  （后台加载校对模型完成）")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[警告] 校对模型加载失败，二次校对已停用：{exc}")
+                        self._cfg.proofread_enabled = False
+            except Exception as exc:  # noqa: BLE001
+                print(f"[警告] 识别模型预加载失败（{exc}），将在首次听写时重试")
+            finally:
+                self._models_ready.set()
+                self.push_state("idle")
+
+        self.push_state("loading")
+        threading.Thread(target=_load, daemon=True).start()
+
     def request_toggle(self) -> None:
-        """UI/热键请求切换。busy 时忽略（校对中的数秒不可打断）。"""
+        """UI/热键请求切换。busy 或模型未就绪时忽略。"""
         if self._busy:
             return
+        if not self._models_ready.is_set():
+            print("[提示] 模型加载中，请稍候再试")
+            return
         self._busy = True
-        self.push_state("proofreading")  # 启动期模型加载 / 停止期校对共用蓝色提示
         if self._active:
+            self.push_state("proofreading")
             threading.Thread(target=self._finish_toggle, daemon=True).start()
         else:
             threading.Thread(target=self._start_toggle, daemon=True).start()
@@ -381,6 +407,7 @@ def _gui_main() -> int:
 
     ui.tray = build_tray(app.cmd_queue, app, hotkey=cfg.hotkey)
     threading.Thread(target=ui.tray.run, daemon=True).start()
+    app.preload_models()  # 后台加载模型（悬浮窗"加载中"，完成后"待命中"）
     loop()
     ui.widget.root.mainloop()
     return 0

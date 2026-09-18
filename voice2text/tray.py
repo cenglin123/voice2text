@@ -44,9 +44,10 @@ def build_tray(cmd_queue: "queue.Queue[tuple]", app, hotkey: str = "alt+v") -> p
 
 
 def update_icon(icon: pystray.Icon, state: str) -> None:
-    """状态 → 图标：listening/recording 都算录音态（红），proofreading 蓝色声波。"""
+    """状态 → 图标：listening/recording 都算录音态（红），proofreading 蓝色声波，loading 待命白。"""
     mapping = {
         "idle": "idle",
+        "loading": "idle",
         "listening": "recording",
         "proofreading": "listening",
         "error": "error",

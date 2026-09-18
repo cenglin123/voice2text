@@ -1,44 +1,64 @@
-"""悬浮窗：置顶、可拖动的药丸形状态窗（tkinter，美术稿 assets/悬浮窗-*.jpg）。
+"""悬浮窗：置顶、可拖动的药丸形状态窗（美术稿 assets/悬浮窗-*.jpg）。
 
-布局：左侧 品牌格点+「语音输入」；中央 麦克风圆环（点击=开始/停止）+状态文字；
-右侧 设置齿轮 | 分隔线 | 关闭。听写中圆环与声波变红并跳动。
+渲染：整面板用 Pillow 以 3x 超采样绘制再缩小（抗锯齿），tkinter 只负责贴图与
+事件；听写中的声波动画按 ~90ms 重绘。圆角外用 transparentcolor 透视。
 
-线程约定：所有公开方法必须在 tkinter 主线程调用；工作线程通过 ui_queue 传
-("state", 状态) 消息，由 pump() 轮询应用。
+状态：idle 待命 / loading 模型加载 / listening 聆听 / proofreading 校对 / error 不可用。
+线程约定：公开方法须在主线程调用；工作线程经 ui_queue 传 ("state", s) 由 pump 应用。
 """
 
 from __future__ import annotations
 
+import math
 import queue
 import tkinter
 
-BG = "#1B2433"
-EDGE = "#43536B"
+from PIL import Image, ImageDraw, ImageFont, ImageTk
+
 KEY_COLOR = "#010203"  # transparentcolor 魔法色
+BASE_W, BASE_H = 340, 96
+SS = 3  # 超采样倍数
+
+# 美术稿取色
+BG_TOP = (30, 40, 56)
+BG_BOTTOM = (19, 27, 39)
+EDGE = (67, 83, 107)
 TEXT_PRIMARY = "#E8EDF4"
 TEXT_SECONDARY = "#97A3B4"
-IDLE_COLOR = "#C9D2DD"
-LISTEN_COLOR = "#FA5A52"
-PROOF_COLOR = "#4C9DF8"
-ERROR_COLOR = "#8A94A2"
-
-BASE_W, BASE_H = 340, 96
+IDLE_RING = (126, 139, 156)
+IDLE_MIC = (213, 220, 229)
+LISTEN = (250, 90, 82)
+PROOF = (76, 157, 248)
+LOADING = (152, 165, 179)
+ERROR = (138, 148, 162)
+CIRCLE_FILL = (34, 45, 63)
 
 STATUS_TEXT = {
     "idle": "待命中...",
+    "loading": "加载中...",
     "listening": "正在聆听...",
     "proofreading": "校对中...",
     "error": "不可用",
 }
 
+_STATE_COLOR = {
+    "idle": IDLE_RING,
+    "loading": LOADING,
+    "listening": LISTEN,
+    "proofreading": PROOF,
+    "error": ERROR,
+}
 
-def _rounded(canvas: tkinter.Canvas, x0, y0, x1, y1, r, **kw) -> None:
-    """圆角矩形（多段路径）。"""
-    pts = [
-        x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
-        x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
-    ]
-    canvas.create_polygon(pts, smooth=True, **kw)
+
+def _font(px: int):
+    try:
+        return ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", px)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _lerp(a, b, t):
+    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 class DictationWidget:
@@ -60,6 +80,7 @@ class DictationWidget:
         self._on_hide = on_hide
         self._on_quit = on_quit
         self._state = "idle"
+        self._phase = 0.0
         try:  # 高 DPI 模糊缓解——必须早于首个窗口创建（进程级设置）
             import ctypes
 
@@ -74,18 +95,14 @@ class DictationWidget:
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", opacity)
         self.root.attributes("-transparentcolor", KEY_COLOR)
-        w, h = int(BASE_W * scale), int(BASE_H * scale)
-        self.root.geometry(f"{w}x{h}+60+60")
+        self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
+        self.root.geometry(f"{self._w}x{self._h}+60+60")
 
-        self.canvas = tkinter.Canvas(self.root, width=w, height=h, bg=KEY_COLOR, highlightthickness=0)
+        self.canvas = tkinter.Canvas(self.root, width=self._w, height=self._h, bg=KEY_COLOR, highlightthickness=0)
         self.canvas.pack()
-        self._state = "idle"
-        self._wave_phase = 0.0
-        self._anim_job = None
-        self._drag_off = None
-        self._drag_moved = False
-
-        self._draw()
+        self._photo = None
+        self._hits: dict[str, tuple[int, int, int]] = {}  # kind -> (cx, cy, r)
+        self._render()
         self._bind()
         self.root.deiconify()
         self._animate()
@@ -94,114 +111,137 @@ class DictationWidget:
     def state(self) -> str:
         return self._state
 
-    # ---- 绘制 ----
+    # ---- 渲染（PIL 3x 超采样）----
 
-    def _draw(self) -> None:
-        c = self.canvas
-        c.delete("all")
-        s = self._scale
-        w, h = int(BASE_W * s), int(BASE_H * s)
-        accent = {
-            "idle": IDLE_COLOR,
-            "listening": LISTEN_COLOR,
-            "proofreading": PROOF_COLOR,
-            "error": ERROR_COLOR,
-        }[self._state]
+    def _render(self) -> None:
+        w, h = self._w, self._h
+        W, H = w * SS, h * SS
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        R = H // 2 - 1
 
-        _rounded(c, 1, 1, w - 2, h - 2, h // 2 - 1, fill=BG, outline=EDGE, width=1)
+        # 背景：垂直渐变药丸 + 边缘描边 + 顶部高光
+        for y in range(H):
+            t = y / H
+            d.line([0, y, W, y], fill=(*_lerp(BG_TOP, BG_BOTTOM, t), 255))
+        mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=R, fill=255)
+        pill = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        pill.paste(img, (0, 0), mask)
+        d = ImageDraw.Draw(pill)
+        d.rounded_rectangle([0, 0, W - 1, H - 1], radius=R, outline=(*EDGE, 255), width=SS)
+        d.arc([SS, SS, W - SS, int(H * 0.9)], start=200, end=340, fill=(90, 110, 140, 180), width=SS)
+
+        accent = _STATE_COLOR.get(self._state, IDLE_RING)
+        accent255 = (*accent, 255)
 
         # 左上：品牌格点 + 标题
-        gx, gy, gs = int(20 * s), int(18 * s), max(3, int(4 * s))
-        gap = gs + max(2, int(3 * s))
+        gx, gy, gs = int(w * 0.055 * SS), int(h * 0.20 * SS), int(4 * self._scale * SS)
+        gap = gs + int(3 * self._scale * SS)
         for dx in (0, 1):
             for dy in (0, 1):
-                c.create_rectangle(
-                    gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs,
-                    fill=TEXT_SECONDARY, outline="",
+                d.rectangle(
+                    [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
+                    fill=(151, 163, 180, 255),
                 )
-        c.create_text(
-            gx + gap * 2 - gs + int(8 * s), gy + gs,
-            text="语音输入", anchor="w", fill=TEXT_SECONDARY,
-            font=("Microsoft YaHei UI", max(8, int(10 * s))),
-        )
+        f_title = _font(int(10.5 * self._scale * SS))
+        d.text((gx + gap * 2, gy - int(2 * SS)), "语音输入", font=f_title, fill=(151, 163, 180, 255))
 
-        # 右上：齿轮 | 分隔 | 关闭
-        self._tags = {}
-        cx, cy = w - int(64 * s), int(24 * s)
-        self._draw_gear(cx, cy, int(9 * s), TEXT_SECONDARY, tag="gear")
-        c.create_line(w - int(48 * s), int(18 * s), w - int(48 * s), h - int(18 * s), fill=EDGE)
-        self._draw_cross(w - int(26 * s), int(24 * s), int(8 * s), TEXT_SECONDARY, tag="close")
+        # 右上：齿轮 | 分隔线 | 关闭（记录命中区）
+        cy_r = int(h * 0.24 * SS)
+        gear_cx = int(w * 0.775 * SS)
+        div_x = int(w * 0.865 * SS)
+        close_cx = int(w * 0.935 * SS)
+        self._draw_gear(d, gear_cx, cy_r, int(8 * self._scale * SS), (151, 163, 180, 255))
+        d.line([div_x, int(h * 0.18 * SS), div_x, int(h * 0.62 * SS)], fill=(67, 83, 107, 255), width=SS)
+        r_x = int(7 * self._scale * SS)
+        d.line([close_cx - r_x, cy_r - r_x, close_cx + r_x, cy_r + r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
+        d.line([close_cx - r_x, cy_r + r_x, close_cx + r_x, cy_r - r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
+        # 命中区（最终像素坐标）
+        self._hits = {
+            "gear": (gear_cx // SS, cy_r // SS, int(14 * self._scale)),
+            "close": (close_cx // SS, cy_r // SS, int(12 * self._scale)),
+        }
 
         # 中央：麦克风圆环 + 麦克风
-        mr, mcx, mcy = int(30 * s), w // 2, int(38 * s)
-        ring_w = 2 if self._state == "idle" else 3
-        c.create_oval(mcx - mr, mcy - mr, mcx + mr, mcy + mr, outline=accent, width=ring_w)
-        self._draw_mic(mcx, mcy, s, accent)
+        mr = int(h * 0.30 * SS)
+        mcx, mcy = W // 2, int(H * 0.40)
+        d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 255))
+        ring_w = int(1.2 * SS) if self._state in ("idle", "loading") else int(1.8 * SS)
+        d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
+        self._hits["mic"] = (mcx // SS, mcy // SS, int(mr / SS * 1.2))
+        self._draw_mic(d, mcx, mcy, mr, accent255)
 
-        # 声波（聆听态）
+        # 声波（聆听）或旋转指示（校对/加载）
         if self._state == "listening":
-            heights = self._wave_heights()
+            heights = self._wave_heights(mr)
+            bar_w = int(3 * self._scale * SS)
             for i, hh in enumerate(heights):
-                x = mcx - mr - int(14 * s) - i * int(7 * s)
-                c.create_line(x, mcy - hh, x, mcy + hh, fill=LISTEN_COLOR, width=max(2, int(2.5 * s)))
-            for i, hh in enumerate(heights):
-                x = mcx + mr + int(14 * s) + i * int(7 * s)
-                c.create_line(x, mcy - hh, x, mcy + hh, fill=LISTEN_COLOR, width=max(2, int(2.5 * s)))
+                x = mcx - mr - int(12 * self._scale * SS) - i * int(9 * self._scale * SS)
+                fade = 1 - i * 0.16
+                col = tuple(round(c * fade) for c in LISTEN) + (255,)
+                d.rounded_rectangle([x - bar_w // 2, mcy - hh, x + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
+                x2 = mcx + mr + int(12 * self._scale * SS) + i * int(9 * self._scale * SS)
+                d.rounded_rectangle([x2 - bar_w // 2, mcy - hh, x2 + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
+        elif self._state in ("proofreading", "loading"):
+            start_a = (self._phase * 240) % 360
+            d.arc([mcx - mr, mcy - mr, mcx + mr, mcy + mr], start=start_a, end=start_a + 110,
+                  fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        c.create_text(
-            mcx, h - int(16 * s), text=STATUS_TEXT.get(self._state, ""), fill=TEXT_PRIMARY,
-            font=("Microsoft YaHei UI", max(8, int(10 * s))),
+        f_status = _font(int(10 * self._scale * SS))
+        text = STATUS_TEXT.get(self._state, "")
+        tw = d.textlength(text, font=f_status)
+        d.text(((W - tw) / 2, int(H * 0.72)), text, font=f_status, fill=(232, 237, 244, 255))
+
+        # 缩小抗锯齿 → 贴图
+        small = pill.resize((w, h), Image.LANCZOS)
+        self._last_pil = small  # 测试/导出挂钩
+        self._photo = ImageTk.PhotoImage(small)
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+
+    def _draw_mic(self, d: ImageDraw.ImageDraw, cx: int, cy: int, mr: int, color) -> None:
+        u = mr / 12.0  # 设计单位（环半径=12）
+        cap_w, cap_h = 5.2 * u, 7.0 * u
+        d.rounded_rectangle(
+            [cx - cap_w, cy - 9 * u, cx + cap_w, cy - 9 * u + 2 * cap_h],
+            radius=cap_w, fill=color,
         )
+        d.line([cx - 3.4 * u, cy - 3.6 * u, cx + 3.4 * u, cy - 3.6 * u], fill=(30, 40, 56, 255), width=max(1, int(u)))
+        d.line([cx - 3.4 * u, cy - 1.4 * u, cx + 3.4 * u, cy - 1.4 * u], fill=(30, 40, 56, 255), width=max(1, int(u)))
+        d.arc([cx - 7 * u, cy - 6 * u, cx + 7 * u, cy + 8 * u], start=25, end=155,
+              fill=color, width=max(1, int(1.6 * u)))
+        d.line([cx, cy + 8 * u, cx, cy + 10.5 * u], fill=color, width=max(1, int(1.6 * u)))
+        d.rounded_rectangle([cx - 4.2 * u, cy + 10.5 * u, cx + 4.2 * u, cy + 12 * u],
+                            radius=1.5 * u, fill=color)
 
-    def _draw_mic(self, cx: int, cy: int, s: float, color: str) -> None:
-        c = self.canvas
-        mw, mh = int(11 * s), int(14 * s)
-        c.create_rectangle(cx - mw, cy - int(16 * s), cx + mw, cy - int(16 * s) + 2 * mh, fill=color, outline="")
-        c.create_arc(cx - int(16 * s), cy - int(12 * s), cx + int(16 * s), cy + int(14 * s),
-                     start=20, extent=140, style="arc", outline=color, width=max(2, int(3 * s)))
-        c.create_line(cx, cy + int(14 * s), cx, cy + int(19 * s), fill=color, width=max(2, int(3 * s)))
-        c.create_line(cx - int(7 * s), cy + int(19 * s), cx + int(7 * s), cy + int(19 * s),
-                      fill=color, width=max(2, int(3 * s)))
-
-    def _draw_gear(self, cx: int, cy: int, r: int, color: str, tag: str) -> None:
-        c = self.canvas
-        c.create_oval(cx - r + 2, cy - r + 2, cx + r - 2, cy + r - 2, outline=color, width=2, tags=tag)
-        import math
-
+    def _draw_gear(self, d: ImageDraw.ImageDraw, cx: int, cy: int, r: int, color) -> None:
+        d.ellipse([cx - r + 2 * SS, cy - r + 2 * SS, cx + r - 2 * SS, cy + r - 2 * SS], outline=color, width=SS)
         for k in range(8):
             a = math.pi * k / 4
-            c.create_line(
-                cx + int((r - 2) * math.cos(a)), cy + int((r - 2) * math.sin(a)),
-                cx + int(r * math.cos(a)), cy + int(r * math.sin(a)),
-                fill=color, width=2, tags=tag,
+            d.line(
+                [cx + (r - 2 * SS) * math.cos(a), cy + (r - 2 * SS) * math.sin(a),
+                 cx + r * math.cos(a), cy + r * math.sin(a)],
+                fill=color, width=SS,
             )
 
-    def _draw_cross(self, cx: int, cy: int, r: int, color: str, tag: str) -> None:
-        c = self.canvas
-        c.create_line(cx - r, cy - r, cx + r, cy + r, fill=color, width=2, tags=tag)
-        c.create_line(cx - r, cy + r, cx + r, cy - r, fill=color, width=2, tags=tag)
-
-    def _wave_heights(self) -> list[int]:
-        import math
-
-        s = self._scale
-        base = int(6 * s)
-        heights = []
+    def _wave_heights(self, mr: int) -> list[int]:
+        base = mr * 0.18
+        amp = mr * 0.42
+        out = []
         for i in range(5):
-            v = math.sin(self._wave_phase + i * 0.9) * 0.5 + 0.5
-            heights.append(int((base + v * int(12 * s)) / 2))
-        return heights
+            v = math.sin(self._phase + i * 1.1) * 0.5 + 0.5
+            out.append(int(base + v * amp) + 2)
+        return out
 
     def _animate(self) -> None:
         if not self.root.winfo_exists():
             return
-        if self._state == "listening":
-            self._wave_phase += 0.55
-            self._draw()
-        elif self._state == "proofreading":
-            self._wave_phase += 0.25
-        self._anim_job = self.root.after(80, self._animate)
+        if self._state in ("listening", "proofreading", "loading"):
+            self._phase += 1
+            self._render()
+        self._anim_job = self.root.after(90, self._animate)
 
     # ---- 交互 ----
 
@@ -215,6 +255,12 @@ class DictationWidget:
         self._drag_off = (ev.x, ev.y)
         self._drag_moved = False
 
+    def _hit(self, x: int, y: int) -> str | None:
+        for kind, (cx, cy, r) in self._hits.items():
+            if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
+                return kind
+        return None
+
     def _on_motion(self, ev) -> None:
         if self._drag_off is None:
             return
@@ -226,11 +272,10 @@ class DictationWidget:
 
     def _on_release(self, ev) -> None:
         if not self._drag_moved and self._drag_off is not None:
-            tags = self.canvas.find_withtag("current")
-            cur = self.canvas.gettags(tags[0]) if tags else ()
-            if "gear" in cur and self._on_settings:
+            kind = self._hit(ev.x, ev.y)
+            if kind == "gear" and self._on_settings:
                 self._on_settings()
-            elif "close" in cur and self._on_hide:
+            elif kind == "close" and self._on_hide:
                 self._on_hide()
             elif self._on_toggle:  # 麦克风/其他区域 = 切换听写
                 self._on_toggle()
@@ -242,7 +287,7 @@ class DictationWidget:
         """主线程调用：切换状态并重绘。"""
         if state != self._state:
             self._state = state
-            self._draw()
+            self._render()
 
     def pump(self, ui_queue: "queue.Queue[tuple]") -> None:
         """主线程轮询：应用工作线程投递的状态消息。"""
@@ -266,10 +311,10 @@ class DictationWidget:
         self._scale = scale
         self._opacity = opacity
         self.root.attributes("-alpha", opacity)
-        w, h = int(BASE_W * scale), int(BASE_H * scale)
-        self.canvas.config(width=w, height=h)
-        self.root.geometry(f"{w}x{h}")
-        self._draw()
+        self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
+        self.canvas.config(width=self._w, height=self._h)
+        self.root.geometry(f"{self._w}x{self._h}")
+        self._render()
 
     def run_tick(self, tick, interval_ms: int = 150) -> None:
         """驱动主循环：tick() 由调用方提供（热键/托盘命令/看门狗）。"""
