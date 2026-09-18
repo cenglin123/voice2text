@@ -268,11 +268,11 @@ class DictationApp:
         if self.hotkey is not None and new_combo and new_combo != self.hotkey.combo:
             try:
                 self.hotkey.rebind(new_combo)
-                self._cfg.hotkey = new_combo
                 print(f"[设置] 热键已更换为 {new_combo}")
             except Exception as exc:  # noqa: BLE001
                 cfg_dict["hotkey"] = self.hotkey.combo  # rebind 失败回退旧值
                 print(f"[设置] 热键更换失败（{exc}），保留 {self.hotkey.combo}")
+        self._cfg.hotkey = str(cfg_dict.get("hotkey", self._cfg.hotkey))
         self._cfg.proofread_enabled = bool(cfg_dict.get("proofread_enabled", True))
         self._cfg.sound_cue = bool(cfg_dict.get("sound_cue", True))
         self._cfg.widget_scale = float(cfg_dict.get("widget_scale", 1.0))
@@ -368,6 +368,7 @@ def _gui_main() -> int:
                 raise SystemExit
 
     last_state = [None]
+    last_visible = [None]
 
     def tick() -> None:
         ui.widget.pump(app.ui_queue)
@@ -377,9 +378,20 @@ def _gui_main() -> int:
             widget_scale, widget_opacity = app.apply_settings_scale
             ui.widget.apply_appearance(widget_scale, widget_opacity)
             app.apply_settings_scale = None
-        if ui.widget.state != last_state[0]:
+        # 托盘与悬浮窗严格同源：状态或可见性变化 → 图标与菜单文案一起刷新
+        if ui.widget.state != last_state[0] or ui.visible != last_visible[0]:
+            state_changed = ui.widget.state != last_state[0]
             last_state[0] = ui.widget.state
-            update_icon(ui.tray, ui.widget.state)
+            last_visible[0] = ui.visible
+            if state_changed:
+                try:
+                    update_icon(ui.tray, ui.widget.state)
+                except Exception:  # noqa: BLE001 —— 托盘异常不影响听写
+                    pass
+            try:
+                ui.tray.update_menu()  # 动态文案（开始/停止、显示/隐藏）重估
+            except Exception:  # noqa: BLE001
+                pass
 
     def loop() -> None:
         try:

@@ -43,6 +43,14 @@ def build_tray(cmd_queue: "queue.Queue[tuple]", app, hotkey: str = "alt+v") -> p
     return icon
 
 
+def refresh_menu(icon: pystray.Icon) -> None:
+    """动态菜单文案变化后调用（pystray 不自动重估 callable）。"""
+    try:
+        icon.update_menu()
+    except Exception:  # noqa: BLE001 —— 托盘异常不影响听写
+        pass
+
+
 def update_icon(icon: pystray.Icon, state: str) -> None:
     """状态 → 图标：listening/recording 都算录音态（红），proofreading 蓝色声波，loading 待命白。"""
     mapping = {

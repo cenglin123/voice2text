@@ -15,7 +15,7 @@ import tkinter
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
-KEY_COLOR = "#010203"  # transparentcolor 魔法色
+KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 96
 SS = 3  # 超采样倍数
 
@@ -130,7 +130,6 @@ class DictationWidget:
         pill.paste(img, (0, 0), mask)
         d = ImageDraw.Draw(pill)
         d.rounded_rectangle([0, 0, W - 1, H - 1], radius=R, outline=(*EDGE, 255), width=SS)
-        d.arc([SS, SS, W - SS, int(H * 0.9)], start=200, end=340, fill=(90, 110, 140, 180), width=SS)
 
         accent = _STATE_COLOR.get(self._state, IDLE_RING)
         accent255 = (*accent, 255)
