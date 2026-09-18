@@ -23,18 +23,18 @@ BASE_W, BASE_H = 340, 96
 SS = 3  # 超采样倍数
 
 # 美术稿取色
-BG_TOP = (30, 40, 56)
-BG_BOTTOM = (19, 27, 39)
-EDGE = (67, 83, 107)
-TEXT_PRIMARY = "#E8EDF4"
+BG_TOP = (38, 53, 82)
+BG_BOTTOM = (14, 21, 33)
+EDGE = (82, 100, 130)
+TEXT_PRIMARY = "#F4F7FC"
 TEXT_SECONDARY = "#97A3B4"
-IDLE_RING = (126, 139, 156)
-IDLE_MIC = (213, 220, 229)
-LISTEN = (250, 90, 82)
-PROOF = (76, 157, 248)
+IDLE_RING = (148, 161, 178)
+IDLE_MIC = (232, 238, 246)
+LISTEN = (255, 84, 74)
+PROOF = (86, 168, 255)
 LOADING = (152, 165, 179)
 ERROR = (138, 148, 162)
-CIRCLE_FILL = (34, 45, 63)
+CIRCLE_FILL = (12, 19, 31)
 
 STATUS_TEXT = {
     "idle": "待命中...",
@@ -150,11 +150,11 @@ class DictationWidget:
             for dy in (0, 1):
                 d.rectangle(
                     [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
-                    fill=(151, 163, 180, 255),
+                    fill=(178, 190, 206, 255),
                 )
-        f_title = _font(int(9.5 * self._scale * SS))
+        f_title = _font(int(10.5 * self._scale * SS))
         title_y = gy - int(2 * SS)
-        d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(151, 163, 180, 255))
+        d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(178, 190, 206, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
         gear_cx = int(w * 0.775 * SS)
@@ -163,8 +163,8 @@ class DictationWidget:
         self._draw_gear(d, gear_cx, row_cy, int(7.5 * self._scale * SS), (151, 163, 180, 255))
         d.line([div_x, int(h * 0.20 * SS), div_x, int(h * 0.58 * SS)], fill=(67, 83, 107, 255), width=SS)
         r_x = int(7 * self._scale * SS)
-        d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
-        d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
+        d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
+        d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
         # 命中区（最终像素坐标）
         self._hits = {
             "gear": (gear_cx // SS, row_cy // SS, int(16 * self._scale)),
@@ -172,10 +172,10 @@ class DictationWidget:
         }
 
         # 中央：麦克风圆环 + 麦克风
-        mr = int(h * 0.26 * SS)
-        mcx, mcy = W // 2, int(H * 0.38)
+        mr = int(h * 0.30 * SS)
+        mcx, mcy = W // 2, int(H * 0.40)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 255))
-        ring_w = int(1.2 * SS) if self._state in ("idle", "loading") else int(1.8 * SS)
+        ring_w = int(1.6 * SS) if self._state in ("idle", "loading") else int(2.4 * SS)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
         self._hits["mic"] = (mcx // SS, mcy // SS, int(mr / SS * 1.2))
         self._draw_mic(d, mcx, mcy, mr, accent255)
@@ -183,10 +183,10 @@ class DictationWidget:
         # 声波（聆听）或旋转指示（校对/加载）
         if self._state == "listening":
             heights = self._wave_heights(mr)
-            bar_w = int(3 * self._scale * SS)
+            bar_w = int(4 * self._scale * SS)
             for i, hh in enumerate(heights):
                 x = mcx - mr - int(10 * self._scale * SS) - i * int(8 * self._scale * SS)
-                fade = 1 - i * 0.16
+                fade = 1 - i * 0.12
                 col = tuple(round(c * fade) for c in LISTEN) + (255,)
                 d.rounded_rectangle([x - bar_w // 2, mcy - hh, x + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
                 x2 = mcx + mr + int(10 * self._scale * SS) + i * int(8 * self._scale * SS)
@@ -197,7 +197,7 @@ class DictationWidget:
                   fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        f_status = _font(int(9.5 * self._scale * SS))
+        f_status = _font(int(10 * self._scale * SS))
         text = STATUS_TEXT.get(self._state, "")
         tw = d.textlength(text, font=f_status)
         d.text(((W - tw) / 2, int(H * 0.80)), text, font=f_status, fill=(232, 237, 244, 255))
@@ -246,7 +246,7 @@ class DictationWidget:
         self.root.attributes("-alpha", self._opacity_pct / 255)
 
     def _draw_mic(self, d: ImageDraw.ImageDraw, cx: int, cy: int, mr: int, color) -> None:
-        u = mr / 12.0  # 设计单位（环半径=12）
+        u = mr / 11.5  # 设计单位
         cap_w, cap_h = 4.8 * u, 7.2 * u
         d.rounded_rectangle(
             [cx - cap_w, cy - 9.5 * u, cx + cap_w, cy - 9.5 * u + 2 * cap_h],
