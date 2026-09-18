@@ -7,6 +7,12 @@
 #### 变更内容
 - 三缺陷叠加：热键Alt+V透传进输入法（改suppress=True）、合成Ctrl+V零间隔被IME拆散（键间加间隔+清修饰键）、停止时剪贴板恢复与最后一次粘贴竞态（join后延迟0.3s）。档案见 docs/problems/bugfix/ime-vmode-text-vanish.md
 
+### 校对交互重构：停止后统一校对
+
+#### 变更内容
+- 用户决策：听写期间屏幕文字只增不改，Alt+V 停止后按锁定句分块（≤60字）统一校对并替换。同时修复连续说话校对不生效：endpoint 阈值 1.5s→0.8s、prompt 强化、照抄检测加温重试；替换记账改为 replace_committed_range。档案见 bugfix/proofread-not-applied-continuous-speech.md
+
+
 ---
 
 ## 2026-09-15

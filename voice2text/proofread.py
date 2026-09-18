@@ -1,8 +1,8 @@
 """二次校对：Qwen3-1.7B（GGUF, llama-cpp-python）清理语音转录文本。
 
-职责（docs/overview.md「为什么校对要等停顿」）：
-- 输入 endpoint 锁定的句子（原始 ASR 输出：无标点、可能含同音错字、赘余语气词）
-- 输出整洁书面语：修正错别字、删语气词、理顺、加标点
+行为（用户决策：听写期间屏幕文字只增不改，Alt+V 停止后才统一校对）：
+- 听写中：endpoint 锁句仅用于分段记账，不做校对替换
+- 停止后：main 把锁定句按 ≤60 字分块，逐块调用本模块校对并替换
 - 延迟预算由调用方执行（proofread_timeout_seconds）；本模块用 max_tokens 限制最坏生成时长
 
 Qwen3 注意（docs/pitfalls.md）：默认开启思考模式——0.3.35 的 chat API 无
@@ -12,7 +12,6 @@ chat_template_kwargs，用 /no_think 后缀关闭 + 防御性剥离 <think> 段�
 from __future__ import annotations
 
 import os
-import queue
 import re
 import threading
 
@@ -24,41 +23,74 @@ _NO_THINK = "/no_think"
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _THINK_UNCLOSED = re.compile(r"<think>.*$", re.DOTALL)  # max_tokens 截断在思考段内
 _OUTPUT_PREFIX = re.compile(r"^(?:输出|校对后|结果)[：:]\s*")
+_HAS_PUNCT = re.compile(r"[，。？！、；：,.?!]")
 
 SYSTEM_PROMPT = (
     "你是语音转录校对器。输入是一句中文语音识别的原始结果，可能包含错别字"
     "（尤其同音字）、赘余语气词（嗯、啊、呃、那个、就是说之类）、口语不连贯、"
     "且没有标点。请输出校对后的句子：修正错别字、删除赘余语气词、理顺语句、"
     "添加合适的标点。要求：保持原意和原语言，不增删实质内容，不改数字和专有名词；"
+    "无论句子多长，都必须添加标点断句，绝不能原样照抄输入；"
     "只输出校对后的句子本身，不要任何解释或前缀。\n"
     "示例：\n"
     "输入：嗯那个我们明天上午九点在会议室碰头讨论一下方案\n"
-    "输出：我们明天上午九点在会议室碰头，讨论一下方案。"
+    "输出：我们明天上午九点在会议室碰头，讨论一下方案。\n"
+    "输入：这个项目整体来说进展是比较顺利的但是在细节上还有很多需要打磨的地方\n"
+    "输出：这个项目整体来说进展是比较顺利的，但是在细节上还有很多需要打磨的地方。"
 )
+
+CHUNK_CHARS = 60  # 分块校对上限：小模型对更长文本会照抄原文（实测 bug）
+
+
+def chunk_sentences(sentences: list[str], max_chars: int = CHUNK_CHARS) -> list[tuple[int, int, str]]:
+    """把锁定句列表切成连续块，返回 (起始句序号, 结束句序号, 块文本)。
+
+    单句超过 max_chars 时独立成块（不截断——截断会破坏语义）。
+    """
+    chunks: list[tuple[int, int, str]] = []
+    i = 0
+    while i < len(sentences):
+        j = i
+        parts: list[str] = []
+        while j < len(sentences):
+            part = sentences[j]
+            if parts and sum(len(p) for p in parts) + len(part) > max_chars:
+                break
+            parts.append(part)
+            j += 1
+        chunks.append((i, j - 1, "".join(parts)))
+        i = j
+    return chunks
 
 
 class Proofreader:
-    """加载 GGUF 并执行单句校对。Llama 实例非线程安全——用锁串行化。"""
+    """加载 GGUF 并执行校对。Llama 实例非线程安全——用锁串行化。"""
 
     def __init__(self, cfg: AppConfig) -> None:
-        self._timeout = cfg.proofread_timeout_seconds
         self._lock = threading.Lock()
         self._llm = llama_cpp.Llama(
             model_path=str(cfg.llm_model_path),
-            n_ctx=1024,  # 单句校对足够（系统提示 ~200 token + 句子 + 输出）
+            n_ctx=1024,  # 分块校对足够（系统提示 ~250 token + 块文本 + 输出）
             n_threads=min(8, os.cpu_count() or 4),
             verbose=False,
         )
 
     def proofread(self, text: str) -> str | None:
-        """校对一句。返回校正文本；失败/可疑时返回 None（调用方保留原文）。
+        """校对一块文本。返回校正文本；失败/可疑时返回 None（调用方保留原文）。
 
-        延迟控制：max_tokens 按输入长度收紧（中文≈1 token/字），
-        单句生成上限约 len*3+64 token，配合调用方超时兜底。
+        延迟控制：max_tokens 按输入长度收紧（中文≈1 token/字）。
+        照抄检测：小模型对"无语气词的长句"偶发原样照抄（实测 bug）——
+        原文无标点而结果与原文相同时，加温重试一次。
         """
         text = text.strip()
         if not text:
             return None
+        result = self._generate(text, temperature=0.3)
+        if result is not None and result == text and not _HAS_PUNCT.search(text):
+            result = self._generate(text, temperature=0.8)  # 照抄了无标点原文：重试
+        return result
+
+    def _generate(self, text: str, temperature: float) -> str | None:
         max_tokens = min(512, len(text) * 3 + 64)
         try:
             with self._lock:
@@ -68,7 +100,7 @@ class Proofreader:
                         {"role": "user", "content": text + " " + _NO_THINK},
                     ],
                     max_tokens=max_tokens,
-                    temperature=0.3,
+                    temperature=temperature,
                 )
         except Exception:  # noqa: BLE001 —— 推理异常保留原文
             return None
@@ -102,53 +134,3 @@ class Proofreader:
             if hits / total < 0.3:
                 return False
         return True
-
-
-class ProofreadWorker(threading.Thread):
-    """校对工作线程：串行消费句子，逐句回调；超时跳过保留原文。
-
-    Llama 生成不可中断——超时由"调用方放弃等待"实现：worker 内部对单句
-    计时，超过 timeout 的结果直接丢弃（生成自然结束后继续处理队列）。
-    """
-
-    def __init__(self, proofreader: Proofreader, timeout: float, on_result) -> None:
-        super().__init__(daemon=True, name="proofread-worker")
-        self._proofreader = proofreader
-        self._timeout = timeout
-        self._on_result = on_result
-        self._queue: "queue.Queue[tuple[int, str] | None]" = queue.Queue()
-        self.error: str | None = None
-
-    def submit(self, index: int, text: str) -> None:
-        self._queue.put((index, text))
-
-    def finish(self) -> None:
-        """请求收尾：处理完已提交的句子后退出（Alt+V 停止路径）。"""
-        self._queue.put(None)
-
-    def run(self) -> None:
-        # 回调链会走到 uiautomation（COM）——与 ASR worker 相同，线程各自初始化
-        try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            self._run_loop()
-        except Exception as exc:  # noqa: BLE001
-            self.error = f"校对线程异常退出：{exc}"
-
-    def _run_loop(self) -> None:
-        import time
-
-        while True:
-            item = self._queue.get()
-            if item is None:
-                return
-            index, text = item
-            t0 = time.monotonic()
-            corrected = self._proofreader.proofread(text)
-            if time.monotonic() - t0 > self._timeout:
-                corrected = None  # 超时丢弃（生成已完成，只是结果不再采用）
-            self._on_result(index, text, corrected)

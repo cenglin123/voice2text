@@ -11,7 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULTS: dict = {
     "hotkey": "alt+v",
     "sample_rate": 16000,
-    "endpoint_pause_seconds": 1.5,
+    # 自然子句停顿多为 0.5~1s：阈值过高会让连续说话永不分句、校对攒到停止才跑（实测 bug）
+    "endpoint_pause_seconds": 0.8,
     "proofread_enabled": True,
     "proofread_timeout_seconds": 10,
     "asr_model_dir": "models/asr/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",

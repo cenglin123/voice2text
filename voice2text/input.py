@@ -158,29 +158,28 @@ class TextInserter:
             self._detached = False
             return committed
 
-    def replace_committed(self, index: int, new_text: str) -> bool:
-        """用校对结果替换第 index 句已上屏文本（阶段 4 校对替换的唯一入口）。
+    def replace_committed_range(self, start: int, end: int, new_text: str) -> bool:
+        """用校对结果替换第 start..end 句（含）的已上屏文本（校对替换的唯一入口）。
 
-        光标处只能"从后往前删"：替换第 k 句需要退格掉其后所有已上屏内容
+        光标处只能"从后往前删"：替换中间句需要退格掉其后所有已上屏内容
         （后续句子 + 当前 partial），重粘"新文本 + 后续句子 + 当前 partial"。
-        与识别线程的并发由 _lock 串行化；预期 index 单调递增（校对按句序回调）。
+        与识别线程的并发由 _lock 串行化。
         """
         with self._lock:
             if not self._session_open:
                 return False
-            if not 0 <= index < len(self._committed_texts):
+            if not (0 <= start <= end < len(self._committed_texts)):
                 return False
-            if new_text.strip() == self._committed_texts[index].strip():
+            old_span = self._committed_texts[start : end + 1]
+            if new_text.strip() == "".join(old_span).strip():
                 return True  # 无实质变化，不动屏幕
             if not self.is_editable_focused():
                 return False  # 不在编辑框：放弃本次替换（原文保留在屏上）
-            suffix = "".join(self._committed_texts[index + 1:]) + self._current
-            old_sentence = self._committed_texts[index]
-            # 句间空格保持原有边界：new_text 直接替换该句占位（prefix 已含在原句文本里，
-            # 校对结果不应吞并边界空格——去掉首尾空格后按需保留原句前缀空格）
-            prefix_space = old_sentence[:1] if old_sentence.startswith(" ") else ""
+            suffix = "".join(self._committed_texts[end + 1 :]) + self._current
+            # 句间空格边界：校对结果不应吞并原句的前缀空格
+            prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
-            delete_count = len(suffix) + len(old_sentence)
+            delete_count = len(suffix) + sum(len(t) for t in old_span)
             for _ in range(delete_count):
                 keyboard.press_and_release("backspace")
             try:
@@ -191,8 +190,9 @@ class TextInserter:
                 self._session_open = False
                 self.aborted = True  # 主循环轮询后向用户解释
                 return False
-            self._committed_texts[index] = replacement
-            if index == len(self._committed_texts) - 1:
+            is_last = end == len(self._committed_texts) - 1
+            self._committed_texts[start : end + 1] = [replacement]
+            if is_last:
                 self._last_committed_tail = replacement[-1:] if replacement else ""
             return True
 
