@@ -1,10 +1,11 @@
-"""光标处上屏：UIA 可编辑检测 + 剪贴板粘贴 + 已上屏记账。
+"""光标处上屏：UIA 可编辑检测 + 文本注入 + 已上屏记账。
 
-设计（docs/overview.md「可编辑检测为什么用 UIAutomation」）：
+设计（docs/overview.md「可编辑检测为什么用 UIAutomation」「为什么不用剪贴板」）：
 - uiautomation 取焦点控件，ControlType ∈ {Edit, Document} 或 ValuePattern 可写 → 可输入
 - 查不到控件（自绘 UI）或 UIA 异常 → 默认放行；config 黑名单按进程名关停
-- 中文上屏走剪贴板 + Ctrl+V（模拟键击会被输入法拦截）；MVP 只保存/恢复文本剪贴板
-- 记账：_current 跟踪当前句已上屏 partial，整句刷新 = 退格 len(_current) 次 + 粘贴新句
+- 默认用 SendInput Unicode 注入直接上屏（不经剪贴板，不污染剪贴板历史）；
+  个别不认 VK_PACKET 的应用可用 config.input_clipboard=true 回退剪贴板粘贴路径
+- 记账：_current 跟踪当前句已上屏 partial，整句刷新 = 退格 len(_current) 次 + 插入新句
 """
 
 from __future__ import annotations
@@ -13,27 +14,33 @@ import re
 import threading
 import time
 
-import keyboard  # type: ignore[import-untyped]
-import pyperclip
+import keyboard  # type: ignore[import-untyped]  # 仅剪贴板兜底路径使用
+import pyperclip  # type: ignore[import-untyped]  # 同上
 import uiautomation  # type: ignore[import-untyped]
+
+from voice2text import keysender
 
 _EDITABLE_CONTROL_TYPES = {"EditControl", "DocumentControl"}
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 
 
 class TextInserter:
-    """负责"光标处写入什么"的唯一记账者——校对替换（阶段 4）也必须经过本类。"""
+    """负责"光标处写入什么"的唯一记账者——校对替换也必须经过本类。"""
 
-    def __init__(self, process_blacklist: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        process_blacklist: list[str] | None = None,
+        use_clipboard: bool = False,
+    ) -> None:
         self._blacklist = {self._norm_process(p) for p in (process_blacklist or [])}
+        self._use_clipboard = use_clipboard
         self._current = ""  # 当前句已上屏的 partial（含句间空格 prefix）
         self._committed_texts: list[str] = []  # 已锁句的屏幕文本（含 prefix），按句序
         self._last_committed_tail = ""  # 上句结尾（决定句间是否补空格）
         self._detached = False  # 本句脱管：焦点离开编辑框后放弃本句剩余 partial，防止重复上屏
-        self.aborted = False  # 粘贴失败导致会话停写（主循环据此提示用户）
-        self._saved_clipboard: str | None = None
+        self.aborted = False  # 注入失败导致会话停写（主循环据此提示用户）
         self._session_open = False
-        self._lock = threading.RLock()  # 识别线程（partial/commit）与校对线程（replace_committed）并发写
+        self._lock = threading.RLock()  # 识别线程（partial/commit）与校对（replace_committed_range）并发写
 
     @property
     def committed_chars(self) -> int:
@@ -55,28 +62,18 @@ class TextInserter:
     # ---- 会话生命周期 ----
 
     def begin_session(self) -> None:
-        """保存用户文本剪贴板（非文本/空剪贴板不保存）。"""
+        """开启会话。不经剪贴板，无保存/恢复动作。"""
         with self._lock:
             self._current = ""
             self._committed_texts = []
             self._detached = False
+            self.aborted = False
             self._session_open = True
             # 注意：_last_committed_tail 不重置——同一文本框里跨会话延续句间空格逻辑
-        try:
-            self._saved_clipboard = pyperclip.paste()
-        except pyperclip.PyperclipException:
-            self._saved_clipboard = None  # 剪贴板里有非文本内容（图片/文件），MVP 不动它
 
     def end_session(self) -> None:
-        """关闭会话（此后所有写入 no-op）并恢复用户剪贴板文本。"""
+        """关闭会话（此后所有写入 no-op）。"""
         self._session_open = False
-        if self._saved_clipboard is not None:
-            try:
-                if pyperclip.paste() != self._saved_clipboard:
-                    pyperclip.copy(self._saved_clipboard)
-            except pyperclip.PyperclipException:
-                pass
-        self._saved_clipboard = None
 
     # ---- 可编辑检测 ----
 
@@ -128,15 +125,15 @@ class TextInserter:
                 self._detached = True
                 self._current = ""
                 return False
-            for _ in range(len(self._current)):
-                keyboard.press_and_release("backspace")
             try:
-                self._paste(target)
-            except pyperclip.PyperclipException:
-                # 剪贴板被瞬态占用：旧 partial 已被退格删除、新文本没贴上——
-                # 屏幕状态未知，本句脱管，下轮 partial 不会基于错误记账继续删字
+                self._delete_chars(len(self._current))
+                self._insert_text(target)
+            except Exception as exc:  # noqa: BLE001 —— 注入失败：屏幕状态未知，本句脱管
                 self._detached = True
                 self._current = ""
+                if isinstance(exc, OSError):
+                    self._session_open = False
+                    self.aborted = True  # 注入层系统性失败，主循环提示用户
                 return False
             self._current = target
             return True
@@ -179,16 +176,14 @@ class TextInserter:
             # 句间空格边界：校对结果不应吞并原句的前缀空格
             prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
-            delete_count = len(suffix) + sum(len(t) for t in old_span)
-            for _ in range(delete_count):
-                keyboard.press_and_release("backspace")
             try:
-                self._paste(replacement + suffix)
-            except pyperclip.PyperclipException:
+                self._delete_chars(sum(len(t) for t in old_span) + len(suffix))
+                self._insert_text(replacement + suffix)
+            except Exception:  # noqa: BLE001
                 # 已删除未重粘：后续句子记账与屏幕失配——为防止连锁错删，
-                # 本会话后续替换一律放弃（比逐句恢复更安全）
+                # 本会话后续写入一律放弃（比逐句恢复更安全）
                 self._session_open = False
-                self.aborted = True  # 主循环轮询后向用户解释
+                self.aborted = True
                 return False
             is_last = end == len(self._committed_texts) - 1
             self._committed_texts[start : end + 1] = [replacement]
@@ -196,19 +191,27 @@ class TextInserter:
                 self._last_committed_tail = replacement[-1:] if replacement else ""
             return True
 
-    def _paste(self, text: str) -> None:
-        """剪贴板 + 合成 Ctrl+V。
+    # ---- 底层写入 ----
 
-        键间必须留间隔：ASR/校对推理占 CPU 时，IME 的异步键盘钩子可能把
-        零间隔连发的 Ctrl 和 v 拆散——落单的 v 进入拼音组合框弹出 v 模式面板、
-        粘贴失败而退格已生效（实测 bug）。粘贴前先补发一次 ctrl keyup，
-        清掉任何可能卡住的修饰键状态。
-        """
-        pyperclip.copy(text)
-        keyboard.release("ctrl")
-        time.sleep(0.01)
-        keyboard.press("ctrl")
-        time.sleep(0.02)
-        keyboard.press_and_release("v")
-        time.sleep(0.02)
-        keyboard.release("ctrl")
+    def _delete_chars(self, n: int) -> None:
+        if self._use_clipboard:
+            for _ in range(n):
+                keyboard.press_and_release("backspace")
+            time.sleep(0.01)
+        else:
+            keysender.send_backspaces(n)
+
+    def _insert_text(self, text: str) -> None:
+        if self._use_clipboard:
+            # 剪贴板兜底路径：键间必须留间隔——IME 的异步键盘钩子可能把零间隔
+            # 连发的 Ctrl 和 v 拆散，落单的 v 进入拼音组合框（实测 bug）。
+            pyperclip.copy(text)
+            keyboard.release("ctrl")
+            time.sleep(0.01)
+            keyboard.press("ctrl")
+            time.sleep(0.02)
+            keyboard.press_and_release("v")
+            time.sleep(0.02)
+            keyboard.release("ctrl")
+        else:
+            keysender.send_text(text)

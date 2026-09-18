@@ -12,6 +12,12 @@
 #### 变更内容
 - 用户决策：听写期间屏幕文字只增不改，Alt+V 停止后按锁定句分块（≤60字）统一校对并替换。同时修复连续说话校对不生效：endpoint 阈值 1.5s→0.8s、prompt 强化、照抄检测加温重试；替换记账改为 replace_committed_range。档案见 bugfix/proofread-not-applied-continuous-speech.md
 
+### 上屏机制重构：Unicode 注入替代剪贴板
+
+#### 变更内容
+- 用户报告 Win+V 剪贴板历史被 partial 刷屏。新默认路径：SendInput KEYEVENTF_UNICODE（VK_PACKET）字符直发光标处，不经剪贴板、绕过输入法；剪贴板+Ctrl+V 降级为 config.input_clipboard=true 兜底；剪贴板保存/恢复逻辑与停止延迟随之删除。App 级全链验证剪贴板零写入
+
+
 
 ---
 

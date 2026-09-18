@@ -7,5 +7,6 @@
   "asr_model_dir": "models/asr/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
   "llm_model_path": "models/llm/Qwen3-1.7B-Q4_K_M.gguf",
   "debug_dump_wav": false,
-  "non_editable_process_blacklist": []
+  "non_editable_process_blacklist": [],
+  "input_clipboard": false
 }

@@ -46,7 +46,9 @@ class DictationApp:
         self._capture = MicrophoneCapture(
             target_rate=cfg.sample_rate, debug_dump_wav=cfg.debug_dump_wav
         )
-        self._inserter = TextInserter(cfg.non_editable_process_blacklist)
+        self._inserter = TextInserter(
+            cfg.non_editable_process_blacklist, use_clipboard=cfg.input_clipboard
+        )
         self._asr: StreamingASR | None = None  # 懒加载（首次会话时，加载约 1 秒）
         self._proofreader: Proofreader | None = None  # 懒加载（首次会话时，加载约 1-2 秒）
         self._worker: ASRSessionWorker | None = None
@@ -110,8 +112,7 @@ class DictationApp:
                 print("[警告] 识别线程未在预期内结束（其迟到回调会被会话代数拦截）")
             self._worker = None
         self._finalize_proofread()  # 用户决策：停止后才统一校对（听写期间不改文字）
-        time.sleep(0.3)  # 等 App 异步消化最后一次 Ctrl+V，再恢复用户剪贴板（否则粘贴读到旧剪贴板）
-        self._inserter.end_session()  # 关写入闸门 + 恢复用户剪贴板
+        self._inserter.end_session()  # 关写入闸门
         self._active = False
         print("[已停止] 待命中")
 

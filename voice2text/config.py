@@ -18,6 +18,9 @@ DEFAULTS: dict = {
     "asr_model_dir": "models/asr/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
     "llm_model_path": "models/llm/Qwen3-1.7B-Q4_K_M.gguf",
     "debug_dump_wav": False,
+    # 文本上屏方式：默认 SendInput Unicode 注入（不经剪贴板，不污染剪贴板历史）；
+    # 个别不认 VK_PACKET 字符的应用可改 true 回退剪贴板 + Ctrl+V 路径
+    "input_clipboard": False,
     "non_editable_process_blacklist": [],
 }
 
@@ -32,6 +35,7 @@ class AppConfig:
     asr_model_dir: Path
     llm_model_path: Path
     debug_dump_wav: bool
+    input_clipboard: bool
     non_editable_process_blacklist: list = field(default_factory=list)
 
     def asr_file(self, name: str) -> Path:
@@ -67,6 +71,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         asr_model_dir=_resolve(merged["asr_model_dir"]),
         llm_model_path=_resolve(merged["llm_model_path"]),
         debug_dump_wav=bool(merged["debug_dump_wav"]),
+        input_clipboard=bool(merged["input_clipboard"]),
         non_editable_process_blacklist=list(merged["non_editable_process_blacklist"]),
     )
 

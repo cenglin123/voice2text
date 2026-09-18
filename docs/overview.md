@@ -43,9 +43,10 @@ Alt+V（keyboard 全局热键，常驻后台）
 - **选择**：Qwen3-1.7B Q4_K_M GGUF（约 1.1GB）。注意：PyPI 上 llama-cpp-python 只发布 sdist，Windows wheel 在作者索引 `https://abetlen.github.io/llama-cpp-python/whl/cpu/`，安装命令须带 `--extra-index-url`，发行包随包携带 wheel
 - **取舍**：校对质量低于 7B 级模型；做成配置项可换更大模型（如 Qwen3-4B）。Qwen3 默认开启思考模式，校对调用必须 `enable_thinking=False`，否则输出带 `<think>` 段且延迟暴涨；单句校对延迟预算 10s，超时放弃校对保留原文
 
-### 为什么用剪贴板粘贴而不是模拟键盘逐字输入
-- 中文输入走模拟键击会被输入法拦截/转义；剪贴板粘贴在任何文本框都可靠
-- 取舍：会覆盖用户剪贴板内容——保存/恢复原剪贴板以缓解；MVP 只保证文本格式剪贴板的恢复，图片/文件列表不保证
+### 上屏为什么用 SendInput Unicode 注入而不是剪贴板
+- 初版方案是剪贴板 + Ctrl+V（规避输入法对普通键击的转义），但 Windows 剪贴板历史（Win+V）会积累每一次 partial 刷新的文本（用户实测不可接受），且与用户剪贴板存在保存/恢复竞态
+- 现方案：SendInput KEYEVENTF_UNICODE（VK_PACKET）把字符作为键盘事件直发光标处，绕过输入法组合、不经剪贴板；KeePass 等自动输入工具的标准做法
+- 兜底：个别不认 VK_PACKET 的应用用 `config.input_clipboard=true` 回退剪贴板路径（该路径键间需留间隔，防 IME 异步钩子把 Ctrl+V 拆散）
 
 ### 可编辑检测为什么用 UIAutomation
 - pyautogui/pyperclip 没有 UI 元素内省能力，判断不了"光标是否在可编辑控件"
