@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 from voice2text import layered
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
-BASE_W, BASE_H = 340, 96
+BASE_W, BASE_H = 340, 104
 SS = 3  # 超采样倍数
 
 # 美术稿取色
@@ -141,8 +141,8 @@ class DictationWidget:
         accent255 = (*accent, 255)
 
         # 左上：品牌格点 + 标题（与右侧按钮同一水平线）
-        row_cy = int(h * 0.25 * SS)
-        gx = int(w * 0.05 * SS)
+        row_cy = int(h * 0.27 * SS)
+        gx = int(w * 0.065 * SS)
         gs = int(3.5 * self._scale * SS)
         gap = gs + int(3 * self._scale * SS)
         gy = row_cy - gap - int(1 * SS)
@@ -157,11 +157,11 @@ class DictationWidget:
         d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(178, 190, 206, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
-        gear_cx = int(w * 0.775 * SS)
-        div_x = int(w * 0.855 * SS)
-        close_cx = int(w * 0.92 * SS)
+        gear_cx = int(w * 0.765 * SS)
+        div_x = int(w * 0.845 * SS)
+        close_cx = int(w * 0.90 * SS)
         self._draw_gear(d, gear_cx, row_cy, int(7.5 * self._scale * SS), (151, 163, 180, 255))
-        d.line([div_x, int(h * 0.20 * SS), div_x, int(h * 0.58 * SS)], fill=(67, 83, 107, 255), width=SS)
+        d.line([div_x, int(h * 0.22 * SS), div_x, int(h * 0.52 * SS)], fill=(67, 83, 107, 255), width=SS)
         r_x = int(7 * self._scale * SS)
         d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
         d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(178, 190, 206, 255), width=int(1.5 * SS))
@@ -200,7 +200,7 @@ class DictationWidget:
         f_status = _font(int(10 * self._scale * SS))
         text = STATUS_TEXT.get(self._state, "")
         tw = d.textlength(text, font=f_status)
-        d.text(((W - tw) / 2, int(H * 0.80)), text, font=f_status, fill=(232, 237, 244, 255))
+        d.text(((W - tw) / 2, int(H * 0.78)), text, font=f_status, fill=(232, 237, 244, 255))
 
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)
