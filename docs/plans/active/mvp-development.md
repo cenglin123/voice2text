@@ -15,7 +15,7 @@ created_at: 2026-09-15
 | 阶段 2：热键 + 音频采集 | 主 Agent | ✅ completed | 独立 reviewer 子代理（两轮） | Alt+V 开关、麦克风 PCM 流 |
 | 阶段 3：流式识别 + 实时上屏 | 主 Agent | ✅ completed | 独立 reviewer 子代理（pass with issues → 修复回归） | sherpa-onnx 集成、UIA 检测、partial 刷新 |
 | 阶段 4：停顿检测 + 二次校对 | 主 Agent | ✅ completed | 独立 reviewer 子代理（pass with issues → 修复回归） | Qwen GGUF 校对替换、停止时终校 |
-| 阶段 5：打磨 + 分发验证 | 主 Agent | queue | 待定 | 干净环境验证、异常处理、托盘 |
+| 阶段 5：打磨 + 分发验证 | 交接中（GUI 部分已完成，剩余见完成记录） | in_progress | 待定 | 干净环境验证、异常处理、发行打包 |
 
 ## 目标
 
@@ -122,13 +122,15 @@ created_at: 2026-09-15
 
 ### 阶段 5：打磨 + 分发验证
 - **目标**：异常处理、系统托盘常驻 + 状态提示、中文 UTF-8 输出、临时文件清理、发行打包（含 wheel 随包）；按美术稿实现 GUI（托盘四状态图标、可拖动置顶悬浮窗、设置窗）
-- **涉及文件**：voice2text/main.py、voice2text/tray.py、voice2text/trayicon.py、voice2text/widget.py、voice2text/settings_window.py、install.bat、docs/*
+- **涉及文件**：voice2text/main.py、voice2text/tray.py、voice2text/trayicon.py、voice2text/widget.py、voice2text/settings_window.py、layered.py、install.bat、docs/*
 - **关键实现约束**：新增依赖须更新 requirements.txt 并重验安装；发行包将 llama-cpp-python wheel 与模型下载脚本一起携带；GUI 按美术稿气质实现、文字一律代码渲染（文生图中文不可用）
+- **GUI 已完成部分**（经三轮用户真机反馈迭代）：trayicon 四状态图标、widget（ULW 逐像素 alpha 分层窗口 + PIL 3x 超采样渲染 + 五状态）、settings_window（手绘滑条/开关/无边框标题栏/快捷键捕获/自启动注册表）、模型启动预加载、托盘命令诊断日志；经独立 reviewer 审查修复（move 通配符 blocker、NameError major 等）
 - **验证标准**：
   1. 无 Python 的干净机器完整走 install → run → 记事本听写 → 校对替换 → 退出，全程可用
   2. 异常注入（拔麦克风/删模型目录/热键被占用）均有友好提示不崩溃
   3. 正常退出与强制结束进程后，均无残留临时音频文件（含调试 wav）
   4. CHANGELOG / overview / deployment 文档已同步
+- **完成记录（部分完成，交接中）**：GUI 交付并经用户真机三轮反馈迭代（视觉/加载状态/托盘联动/内边距均已修）；用户已确认可用：安装、听写主流程、校对、热键、剪贴板零占用、托盘开始停止。剩余：干净机器走查（pbs 分支未实测）、临时文件清理、发行打包、真机验收清单（见上方 CURRENT.md 交接文档）。接手 Agent 先读 docs/CURRENT.md「交接必读」
 - **Owner**：主 Agent
 - **Reviewer**：待定
 - **前置条件**：阶段 4 完成
