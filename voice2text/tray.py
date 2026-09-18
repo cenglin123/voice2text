@@ -19,6 +19,7 @@ def build_tray(cmd_queue: "queue.Queue[tuple]", app, hotkey: str = "alt+v") -> p
 
     def _put(kind: str):
         def _action(icon, item):
+            print(f"[托盘] 菜单动作: {kind}")
             cmd_queue.put((kind, None))
 
         return _action

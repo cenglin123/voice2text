@@ -134,37 +134,40 @@ class DictationWidget:
         accent = _STATE_COLOR.get(self._state, IDLE_RING)
         accent255 = (*accent, 255)
 
-        # 左上：品牌格点 + 标题
-        gx, gy, gs = int(w * 0.055 * SS), int(h * 0.20 * SS), int(4 * self._scale * SS)
-        gap = gs + int(3 * self._scale * SS)
+        # 左上：品牌格点 + 标题（与右侧按钮同一水平线）
+        row_cy = int(h * 0.28 * SS)
+        gx = int(w * 0.05 * SS)
+        gs = int(4.5 * self._scale * SS)
+        gap = gs + int(3.5 * self._scale * SS)
+        gy = row_cy - gap - int(1 * SS)
         for dx in (0, 1):
             for dy in (0, 1):
                 d.rectangle(
                     [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
                     fill=(151, 163, 180, 255),
                 )
-        f_title = _font(int(10.5 * self._scale * SS))
-        d.text((gx + gap * 2, gy - int(2 * SS)), "语音输入", font=f_title, fill=(151, 163, 180, 255))
+        f_title = _font(int(11 * self._scale * SS))
+        title_y = gy - int(3 * SS)
+        d.text((gx + gap * 2 + gs, title_y), "语音输入", font=f_title, fill=(151, 163, 180, 255))
 
-        # 右上：齿轮 | 分隔线 | 关闭（记录命中区）
-        cy_r = int(h * 0.24 * SS)
-        gear_cx = int(w * 0.775 * SS)
-        div_x = int(w * 0.865 * SS)
-        close_cx = int(w * 0.935 * SS)
-        self._draw_gear(d, gear_cx, cy_r, int(8 * self._scale * SS), (151, 163, 180, 255))
-        d.line([div_x, int(h * 0.18 * SS), div_x, int(h * 0.62 * SS)], fill=(67, 83, 107, 255), width=SS)
-        r_x = int(7 * self._scale * SS)
-        d.line([close_cx - r_x, cy_r - r_x, close_cx + r_x, cy_r + r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
-        d.line([close_cx - r_x, cy_r + r_x, close_cx + r_x, cy_r - r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
+        # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
+        gear_cx = int(w * 0.79 * SS)
+        div_x = int(w * 0.87 * SS)
+        close_cx = int(w * 0.94 * SS)
+        self._draw_gear(d, gear_cx, row_cy, int(9 * self._scale * SS), (151, 163, 180, 255))
+        d.line([div_x, int(h * 0.20 * SS), div_x, int(h * 0.58 * SS)], fill=(67, 83, 107, 255), width=SS)
+        r_x = int(8 * self._scale * SS)
+        d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
+        d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(151, 163, 180, 255), width=int(1.5 * SS))
         # 命中区（最终像素坐标）
         self._hits = {
-            "gear": (gear_cx // SS, cy_r // SS, int(14 * self._scale)),
-            "close": (close_cx // SS, cy_r // SS, int(12 * self._scale)),
+            "gear": (gear_cx // SS, row_cy // SS, int(16 * self._scale)),
+            "close": (close_cx // SS, row_cy // SS, int(14 * self._scale)),
         }
 
         # 中央：麦克风圆环 + 麦克风
-        mr = int(h * 0.30 * SS)
-        mcx, mcy = W // 2, int(H * 0.40)
+        mr = int(h * 0.32 * SS)
+        mcx, mcy = W // 2, int(H * 0.42)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 255))
         ring_w = int(1.2 * SS) if self._state in ("idle", "loading") else int(1.8 * SS)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
@@ -188,10 +191,10 @@ class DictationWidget:
                   fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        f_status = _font(int(10 * self._scale * SS))
+        f_status = _font(int(10.5 * self._scale * SS))
         text = STATUS_TEXT.get(self._state, "")
         tw = d.textlength(text, font=f_status)
-        d.text(((W - tw) / 2, int(H * 0.72)), text, font=f_status, fill=(232, 237, 244, 255))
+        d.text(((W - tw) / 2, int(H * 0.76)), text, font=f_status, fill=(232, 237, 244, 255))
 
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)

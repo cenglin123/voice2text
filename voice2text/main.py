@@ -243,7 +243,13 @@ class DictationApp:
             except queue.Empty:
                 break
             if cmd == "toggle":
-                self.request_toggle()
+                if self._busy:
+                    print("[托盘] 忽略切换请求：上一轮启动/停止仍在进行")
+                elif not self._models_ready.is_set():
+                    print("[托盘] 忽略切换请求：模型仍在加载")
+                else:
+                    print("[托盘] 切换听写状态")
+                    self.request_toggle()
 
         if self._active and not self._busy:
             if self._capture.error or self._inserter.aborted:
@@ -346,7 +352,10 @@ def _gui_main() -> int:
                 cmd, _ = app.cmd_queue.get_nowait()
             except queue.Empty:
                 return
-            if cmd == "toggle_widget":
+            if cmd == "toggle":
+                print("[托盘] 收到切换命令")
+                app.request_toggle()
+            elif cmd == "toggle_widget":
                 (hide_widget if ui.visible else show_widget)()
             elif cmd == "settings":
                 w = ui.settings
