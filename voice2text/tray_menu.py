@@ -50,7 +50,7 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
-def _hotkey_text(draw, combo: str, max_width: int):
+def _hotkey_text(draw, combo: str, max_width: int, scale: float = 1.0):
     """在固定右栏内完整显示快捷键；长组合改用紧凑拼写并逐级缩小。"""
     aliases = {
         "ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "Shift",
@@ -65,10 +65,10 @@ def _hotkey_text(draw, combo: str, max_width: int):
         candidates.append(f"{parts[0]}+…+{parts[-1]}")
     for candidate in candidates:
         for size in (12, 11, 10):
-            font = _font(size * SS)
+            font = _font(round(size * scale) * SS)
             if draw.textlength(candidate, font=font) <= max_width:
                 return candidate, font
-    return candidates[-1], _font(10 * SS)
+    return candidates[-1], _font(round(10 * scale) * SS)
 
 
 class TrayMenu:
@@ -76,6 +76,7 @@ class TrayMenu:
 
     def __init__(self, master, app, command) -> None:
         self.app = app
+        self.font_scale = max(0.85, min(1.35, float(getattr(app, "font_scale", 1.0))))
         self.command = command
         self.rows = [
             ("widget", lambda: "隐藏悬浮窗" if app.widget_visible else "显示悬浮窗", "toggle_widget"),
@@ -105,6 +106,10 @@ class TrayMenu:
         self.canvas.bind("<ButtonRelease-3>", lambda e: self.hide())
         self._render()
         self._poll()
+
+    def set_font_scale(self, value: float) -> None:
+        self.font_scale = max(0.85, min(1.35, float(value)))
+        self._render()
 
     def show(self, x: int, y: int) -> None:
         info = _MonitorInfo(size=ctypes.sizeof(_MonitorInfo))
@@ -182,10 +187,10 @@ class TrayMenu:
         top_y = (PAD + TOP_H // 2) * SS
         self._icon(d, "mic", 41 * SS, top_y, ACCENT)
         label = "停止听写" if self.app.active else "开始听写"
-        d.text((70 * SS, top_y), label, anchor="lm", font=_font(16 * SS), fill=TEXT)
+        d.text((70 * SS, top_y), label, anchor="lm", font=_font(round(16 * self.font_scale) * SS), fill=TEXT)
         hotkey_right = (WIDTH - 22) * SS
         hotkey_max = (WIDTH - 172) * SS
-        hotkey, hotkey_font = _hotkey_text(d, self.app.hotkey.combo, hotkey_max)
+        hotkey, hotkey_font = _hotkey_text(d, self.app.hotkey.combo, hotkey_max, self.font_scale)
         self._hotkey_display = hotkey
         self._hotkey_width = d.textlength(hotkey, font=hotkey_font)
         d.text((hotkey_right, top_y), hotkey, anchor="rm", font=hotkey_font, fill=SUB)
@@ -198,7 +203,7 @@ class TrayMenu:
                                     radius=9 * SS, fill=HOVER)
             cy = y0 + ROW_H * SS // 2
             self._icon(d, kind, 41 * SS, cy, SUB)
-            d.text((70 * SS, cy), label_fn(), anchor="lm", font=_font(14 * SS), fill=TEXT)
+            d.text((70 * SS, cy), label_fn(), anchor="lm", font=_font(round(14 * self.font_scale) * SS), fill=TEXT)
             if kind in {"gear", "book", "terminal"}:
                 self._chevron(d, (WIDTH - 27) * SS, cy, SUB)
             if i in (1, 3):

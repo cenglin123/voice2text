@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import tkinter
+import tkinter.font as tkfont
 import winreg
 from pathlib import Path
 
@@ -327,9 +328,12 @@ def _normalize_combo(ev) -> str | None:
 class SettingsWindow:
     """设置窗口。apply_cb(config_dict) 在保存时被调用（主线程），返回生效值供写盘。"""
 
-    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None) -> None:
+    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None, on_debug=None) -> None:
         self._apply_cb = apply_cb
+        self._on_debug = on_debug
         self._cfg = dict(cfg_dict)
+        self._font_scale = float(self._cfg.get("font_scale", 1.0))
+        self._font_widgets = []
         self._capturing = False
         self._preview_source = preview_image
         self._preview_scale = float(cfg_dict.get("widget_scale", 1.0))
@@ -401,6 +405,9 @@ class SettingsWindow:
         footer.pack(side="bottom", fill="x", padx=28, pady=16)
         tkinter.Label(footer, text="更改将在保存后生效", bg=_BG, fg=_SUB,
                       font=(_FONT, -12)).pack(side="left")
+        if self._on_debug:
+            RoundedButton(footer, "运行输出", self._open_debug, width=88, height=40,
+                          bg=_CARD, fg=_SUB, active="#304A70").pack(side="left", padx=(18, 0))
         self._save_btn = RoundedButton(footer, "保存并应用", self._save, width=124, height=44,
                                        bg=_ACCENT, fg="#FFFFFF", active="#70AEFF", bold=True)
         self._save_btn.pack(side="right")
@@ -457,11 +464,13 @@ class SettingsWindow:
         self._scale_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_scale", 1.0)) * 100))
         self._aspect_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_aspect", 3.27)) * 100))
         self._opacity_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_opacity", 0.92)) * 100))
+        self._font_var = tkinter.DoubleVar(value=round(self._font_scale * 100))
         self._sliders = []
         self._percent_vars = []
         for label, var, low, high, suffix in (("窗口大小", self._scale_var, 50, 150, "%"),
                                       ("长宽比", self._aspect_var, 100, 500, ""),
-                                      ("不透明度", self._opacity_var, 30, 100, "%")):
+                                      ("不透明度", self._opacity_var, 30, 100, "%"),
+                                      ("界面字体", self._font_var, 85, 135, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
             row.pack(fill="x", pady=2)
             tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
@@ -474,6 +483,7 @@ class SettingsWindow:
             slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
             self._sliders.append(slider)
             var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
+        self._font_var.trace_add("write", lambda *_: self._set_font_scale(self._font_var.get() / 100))
         self._preview = tkinter.Canvas(c2, height=118, bg=_CARD, highlightthickness=0)
         self._preview.pack(fill="x", pady=(6, 0))
         self._preview.bind("<Configure>", lambda e: self._draw_preview())
@@ -500,6 +510,8 @@ class SettingsWindow:
             box.pack(side="left", fill="x", expand=True)
             tkinter.Label(box, text=label, bg=_CARD, fg=_TEXT, font=(_FONT, -14)).pack(anchor="w")
             tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB, font=(_FONT, -12)).pack(anchor="w", pady=(2, 0))
+        self._record_font_widgets()
+        self._set_font_scale(self._font_scale)
         self._select_page("all")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.bind("<Escape>", lambda e: self._finish_capture(None) if self._capturing else self._close())
@@ -557,6 +569,41 @@ class SettingsWindow:
     def _appearance_changed(self, var, text, suffix="%") -> None:
         text.set(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}")
         self._draw_preview()
+
+    def _record_font_widgets(self) -> None:
+        """记录当前控件字号，便于字体滑条即时缩放整个设置页。"""
+        self._font_widgets.clear()
+        def visit(widget):
+            try:
+                spec = widget.cget("font")
+                if spec:
+                    f = tkfont.Font(font=spec)
+                    size = abs(int(f.cget("size")))
+                    if size:
+                        self._font_widgets.append((widget, f.cget("family"), size / max(self._font_scale, 0.01),
+                                                   f.cget("weight"), f.cget("slant"),
+                                                   f.cget("underline"), f.cget("overstrike")))
+            except (tkinter.TclError, TypeError):
+                pass
+            for child in widget.winfo_children():
+                visit(child)
+        visit(self.root)
+
+    def _set_font_scale(self, value: float) -> None:
+        self._font_scale = max(0.85, min(1.35, float(value)))
+        for widget, family, base, weight, slant, underline, overstrike in self._font_widgets:
+            try:
+                widget.configure(font=(family, -max(8, round(base * self._font_scale)), weight,
+                                       slant, underline, overstrike))
+            except tkinter.TclError:
+                pass
+
+    def _open_debug(self) -> None:
+        if self._on_debug:
+            # 让新开的运行输出窗口可见；设置页仍保留在后台，关闭输出后可继续编辑。
+            self.root.attributes("-topmost", False)
+            self.root.lower()
+            self._on_debug()
 
     def _draw_preview(self) -> None:
         if not hasattr(self, "_preview"):
@@ -653,6 +700,7 @@ class SettingsWindow:
         self._cfg["widget_scale"] = round(self._scale_var.get() / 100, 2)
         self._cfg["widget_aspect"] = round(self._aspect_var.get() / 100, 2)
         self._cfg["widget_opacity"] = round(self._opacity_var.get() / 100, 2)
+        self._cfg["font_scale"] = round(self._font_var.get() / 100, 2)
         self._cfg["proofread_enabled"] = bool(self._proof_var.get())
         self._cfg["sound_cue"] = bool(self._sound_var.get())
         self._cfg["autostart"] = bool(self._autostart_var.get())

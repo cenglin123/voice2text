@@ -29,6 +29,7 @@ DEFAULTS: dict = {
     "widget_scale": 1.0,  # 悬浮窗缩放 0.5~1.5
     "widget_aspect": 3.27,  # 悬浮窗长宽比 1.0~5.0
     "widget_opacity": 0.92,  # 悬浮窗不透明度 0.3~1.0
+    "font_scale": 1.0,  # 设置页与托盘字体缩放 0.85~1.35
     "sound_cue": True,  # 开始/停止听写提示音
     "autostart": False,  # 开机自启动（实际状态以注册表为准，此处仅持久化 UI 选择）
     "non_editable_process_blacklist": [],
@@ -52,6 +53,7 @@ class AppConfig:
     widget_scale: float
     widget_aspect: float
     widget_opacity: float
+    font_scale: float
     sound_cue: bool
     autostart: bool
     non_editable_process_blacklist: list = field(default_factory=list)
@@ -96,6 +98,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         widget_scale=float(merged["widget_scale"]),
         widget_aspect=float(merged["widget_aspect"]),
         widget_opacity=float(merged["widget_opacity"]),
+        font_scale=float(merged["font_scale"]),
         sound_cue=bool(merged["sound_cue"]),
         autostart=bool(merged["autostart"]),
         non_editable_process_blacklist=list(merged["non_editable_process_blacklist"]),

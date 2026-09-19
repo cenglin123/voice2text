@@ -90,6 +90,7 @@ class DictationApp:
         self._active = False
         self._busy = False  # 启动/停止进行中，忽略新的切换请求
         self.apply_settings_scale: tuple[float, float, float] | None = None  # 缩放、透明度、长宽比
+        self.apply_settings_font_scale: float | None = None
         self._models_ready = threading.Event()  # 预加载完成（成功与否都置位）
         self._closing = False
         self._session_thread: threading.Thread | None = None
@@ -98,6 +99,10 @@ class DictationApp:
     @property
     def active(self) -> bool:
         return self._active
+
+    @property
+    def font_scale(self) -> float:
+        return float(getattr(self._cfg, "font_scale", 1.0))
 
     def push_state(self, state: str) -> None:
         self.ui_queue.put(("state", state))
@@ -480,7 +485,9 @@ class DictationApp:
         self._cfg.widget_scale = float(cfg_dict.get("widget_scale", 1.0))
         self._cfg.widget_aspect = float(cfg_dict.get("widget_aspect", 3.27))
         self._cfg.widget_opacity = float(cfg_dict.get("widget_opacity", 0.92))
+        self._cfg.font_scale = max(0.85, min(1.35, float(cfg_dict.get("font_scale", 1.0))))
         self.apply_settings_scale = (self._cfg.widget_scale, self._cfg.widget_opacity, self._cfg.widget_aspect)
+        self.apply_settings_font_scale = self._cfg.font_scale
         return dict(cfg_dict)
 
 
@@ -591,8 +598,12 @@ def _gui_main(output) -> int:
                         "widget_opacity": cfg.widget_opacity,
                         "proofread_enabled": cfg.proofread_enabled,
                         "sound_cue": cfg.sound_cue,
+                        "font_scale": cfg.font_scale,
                     }
-                    ui.settings = SettingsWindow(cfg_dict, app.apply_settings, ui.widget.snapshot())
+                    ui.settings = SettingsWindow(
+                        cfg_dict, app.apply_settings, ui.widget.snapshot(),
+                        on_debug=lambda: app.cmd_queue.put(("debug", None)),
+                    )
                 else:
                     w.root.attributes("-topmost", True)
                     w.root.lift()
@@ -628,6 +639,9 @@ def _gui_main(output) -> int:
                 ui.tray.update_menu()
             except Exception:  # noqa: BLE001
                 pass
+        if app.apply_settings_font_scale is not None:
+            ui.tray_menu.set_font_scale(app.apply_settings_font_scale)
+            app.apply_settings_font_scale = None
         # 托盘与悬浮窗严格同源：状态或可见性变化 → 图标与菜单文案一起刷新
         if ui.widget.state != last_state[0] or ui.visible != last_visible[0]:
             state_changed = ui.widget.state != last_state[0]
