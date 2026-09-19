@@ -453,6 +453,8 @@ class DictationApp:
         """先关写入闸门，防止退出过程中的迟到识别/校对继续写入。"""
         self._closing = True
         self._inserter.end_session()
+        from voice2text.model_download import model_download
+        model_download.close()
         if self._activity_guard is not None:
             self._activity_guard.close()
             self._activity_guard = None

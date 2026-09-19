@@ -5,25 +5,28 @@ cd /d "%~dp0"
 set "PYTHONUTF8=1"
 rem isolate from any packages the user installed into AppData Roaming site-packages
 set "PYTHONNOUSERSITE=1"
+if exist "offline-bundle.txt" goto offline_install
 set "LLAMA_INDEX=https://abetlen.github.io/llama-cpp-python/whl/cpu/"
 set "PY="
+set "LOCAL_LLAMA="
+set "PY_CHECK=import sys,struct,tkinter; sys.exit(0 if (3,11) <= sys.version_info[:2] <= (3,13) and struct.calcsize('P') == 8 else 1)"
 
-echo [1/4] Locating Python 3.10+ ...
+echo [1/4] Locating Python 3.11-3.13 x64 with Tk ...
 
 rem Prefer the py launcher
-py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+py -3 -c "%PY_CHECK%" >nul 2>&1
 if not errorlevel 1 (
     if not exist ".venv\Scripts\python.exe" py -3 -m venv .venv || goto venv_bad
-    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1 || goto venv_bad
+    ".venv\Scripts\python.exe" -c "%PY_CHECK%" >nul 2>&1 || goto venv_bad
     set "PY=.venv\Scripts\python.exe"
     goto got_python
 )
 
 rem Plain python on PATH (the Microsoft Store stub returns a non-zero code here and is skipped)
-python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+python -c "%PY_CHECK%" >nul 2>&1
 if not errorlevel 1 (
     if not exist ".venv\Scripts\python.exe" python -m venv .venv || goto venv_bad
-    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1 || goto venv_bad
+    ".venv\Scripts\python.exe" -c "%PY_CHECK%" >nul 2>&1 || goto venv_bad
     set "PY=.venv\Scripts\python.exe"
     goto got_python
 )
@@ -35,15 +38,15 @@ rem machine would loop forever and leave a poisoned .venv for run.bat.
 if exist ".venv" rmdir /s /q ".venv"
 py -3 -m venv .venv >nul 2>&1
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1 || rmdir /s /q ".venv"
+    ".venv\Scripts\python.exe" -c "%PY_CHECK%" >nul 2>&1 || rmdir /s /q ".venv"
 )
 if exist ".venv\Scripts\python.exe" (
     set "PY=.venv\Scripts\python.exe"
     goto got_python
 )
 
-rem No usable Python: self-contained full runtime (nuget package includes tkinter for the GUI)
-echo   No Python 3.10+ found, setting up embedded runtime ...
+rem No usable Python: python-build-standalone includes tkinter for the GUI.
+echo   No compatible Python found, setting up standalone runtime ...
 if exist "runtime\python\python.exe" if exist "runtime\python\Lib\site-packages\pip" goto runtime_ready
 
 if not exist "runtime\python\python.exe" (
@@ -64,16 +67,26 @@ del runtime_py.tar.gz get-pip.py 2>nul
 
 :runtime_ready
 set "PY=runtime\python\python.exe"
+"%PY%" -c "%PY_CHECK%" >nul 2>&1
+if errorlevel 1 (echo   [FAIL] incompatible runtime; move runtime folder aside and retry & goto fail)
 
 :got_python
 echo   Using: %PY%
 
 echo [2/4] Installing dependencies (this may take a few minutes) ...
-"%PY%" -m pip install --upgrade pip --quiet --extra-index-url %LLAMA_INDEX%
-"%PY%" -m pip install -r requirements.txt --extra-index-url %LLAMA_INDEX%
+"%PY%" -m pip install --upgrade pip --quiet
+set "WHEEL_SOURCE=--extra-index-url %LLAMA_INDEX%"
+for %%F in ("vendor\llama_cpp_python-0.3.35-*.whl") do if exist "%%~fF" set "LOCAL_LLAMA=%%~fF"
+if defined LOCAL_LLAMA (
+    echo   Installing bundled llama-cpp-python wheel ...
+    "%PY%" -m pip install --no-deps "%LOCAL_LLAMA%"
+    if errorlevel 1 (echo   [FAIL] bundled llama-cpp-python wheel installation failed & goto fail)
+    set "WHEEL_SOURCE=--find-links vendor"
+)
+"%PY%" -m pip install --only-binary=:all: -r requirements.txt %WHEEL_SOURCE%
 if errorlevel 1 (
     echo   Retry with Tsinghua PyPI mirror ...
-    "%PY%" -m pip install -r requirements.txt --extra-index-url %LLAMA_INDEX% -i https://pypi.tuna.tsinghua.edu.cn/simple
+    "%PY%" -m pip install --only-binary=:all: -r requirements.txt %WHEEL_SOURCE% -i https://pypi.tuna.tsinghua.edu.cn/simple
     if errorlevel 1 (echo   [FAIL] dependency installation failed & goto fail)
 )
 
@@ -95,3 +108,10 @@ exit /b 0
 echo.
 echo  Install FAILED. Fix the problem above and re-run.
 exit /b 1
+
+:offline_install
+echo Verifying self-contained offline installation ...
+"runtime\python\python.exe" -I -X utf8 scripts\verify_install.py
+if errorlevel 1 goto fail
+echo Install OK. Start with run.bat
+exit /b 0

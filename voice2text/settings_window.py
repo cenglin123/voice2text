@@ -16,7 +16,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageTk
 
-from voice2text.config import PROJECT_ROOT
+from voice2text.config import PROJECT_ROOT, load_config
+from voice2text.model_download import model_download
 
 _BG = "#16243D"
 _CARD = "#20314D"
@@ -491,6 +492,16 @@ class SettingsWindow:
 
         c3 = card("features", "功能设置", "")
         self._proof_var = tkinter.BooleanVar(value=bool(self._cfg.get("proofread_enabled", True)))
+        self._llm_path = load_config().llm_model_path
+        model_row = tkinter.Frame(c3, bg=_CARD)
+        model_row.pack(fill="x", pady=(4, 12))
+        self._model_status = tkinter.StringVar()
+        tkinter.Label(model_row, textvariable=self._model_status, bg=_CARD, fg=_SUB,
+                      font=(_FONT, -12), wraplength=440, justify="left").pack(side="left", fill="x", expand=True)
+        self._download_button = RoundedButton(model_row, text="下载校对模型 · 1.1 GB",
+                      command=self._download_model, bg=_TRACK, fg=_TEXT, width=210, height=38)
+        self._download_button.pack(side="right")
+        self._poll_model_download()
         self._sound_var = tkinter.BooleanVar(value=bool(self._cfg.get("sound_cue", True)))
         self._autostart_var = tkinter.BooleanVar(value=get_autostart())
         self._toggles = []
@@ -515,9 +526,28 @@ class SettingsWindow:
         self._set_font_scale(self._font_scale)
         self._select_page("all")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.bind("<Destroy>", self._cancel_model_poll, add="+")
         self.root.bind("<Escape>", lambda e: self._finish_capture(None) if self._capturing else self._close())
         self.root.deiconify()
         self.root.lift()
+
+    def _download_model(self) -> None:
+        if not self._llm_path.is_file():
+            model_download.start(self._llm_path)
+
+    def _poll_model_download(self) -> None:
+        if not self.root.winfo_exists():
+            return
+        active, message = model_download.snapshot()
+        ready = self._llm_path.is_file()
+        self._model_status.set(message or ("校对模型已安装" if ready else "可选：未安装校对模型，语音与标点仍可正常使用"))
+        self._download_button.set_style(text="下载中…" if active else "已安装" if ready else "下载校对模型 · 1.1 GB",
+                                        fg=_SUB if active or ready else _TEXT)
+        self._model_poll = self.root.after(500, self._poll_model_download)
+
+    def _cancel_model_poll(self, event) -> None:
+        if event.widget is self.root:
+            self.root.after_cancel(self._model_poll)
 
     def _apply_window_rounding(self) -> None:
         """用透明色角罩裁掉无边框设置窗的四个方形外角。"""
@@ -702,7 +732,7 @@ class SettingsWindow:
         self._cfg["widget_aspect"] = round(self._aspect_var.get() / 100, 2)
         self._cfg["widget_opacity"] = round(self._opacity_var.get() / 100, 2)
         self._cfg["font_scale"] = round(self._font_var.get() / 100, 2)
-        self._cfg["proofread_enabled"] = bool(self._proof_var.get())
+        self._cfg["proofread_enabled"] = bool(self._proof_var.get()) and self._llm_path.is_file()
         self._cfg["sound_cue"] = bool(self._sound_var.get())
         self._cfg["autostart"] = bool(self._autostart_var.get())
         set_autostart(bool(self._autostart_var.get()))

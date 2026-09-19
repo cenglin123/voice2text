@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import ssl
+import subprocess
 import sys
 import tarfile
 import time
@@ -123,6 +126,25 @@ def download(urls: tuple[str, ...], dest: Path, min_bytes: int = 0) -> bool:
             return True
         except Exception as exc:  # noqa: BLE001 —— 逐源 fallback，任何失败都换下一个源
             sys.stdout.write("\n")
+            # Windows 的系统 curl 使用系统 TLS 实现；仅在 Python 证书链失败时回退，
+            # 保持证书验证开启。新请求完整下载，避免拼接来源不同的部分文件。
+            if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+                curl = shutil.which("curl.exe")
+                if curl:
+                    print("  [重试] Python 证书链校验失败，使用系统 curl（保留证书校验）")
+                    try:
+                        subprocess.run(
+                            [curl, "--fail", "--location", "--retry", "2", "--connect-timeout", "30",
+                             "--max-time", "600", "--output", str(part), url],
+                            check=True, timeout=1900,
+                        )
+                        if part.stat().st_size < max(min_bytes, 1):
+                            raise IOError("系统 curl 下载结果不完整")
+                        part.replace(dest)
+                        print(f"  [完成] {dest.name}（系统 curl）")
+                        return True
+                    except (OSError, subprocess.SubprocessError) as curl_exc:
+                        print(f"  [警告] 系统 curl 下载失败：{curl_exc}")
             print(f"  [警告] 源不可用，换下一个：{exc}")
             continue
     print(f"  [失败] {dest.name} 所有下载源均不可用")
@@ -205,12 +227,18 @@ def install_punctuation(force: bool) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="下载 voice2text 所需模型")
     parser.add_argument("--force", action="store_true", help="忽略已有文件强制重下")
+    parser.add_argument("--only", choices=("base", "llm", "all"), default="all")
+    parser.add_argument("--llm-dest", type=Path, help="校对模型本地保存位置（下载源固定）")
     args = parser.parse_args()
 
     print(f"模型目录: {MODELS_DIR}")
-    ok = install_asr(args.force)
-    ok = install_punctuation(args.force) and ok
-    ok = install_llm(args.force) and ok
+    ok = True
+    if args.only in ("base", "all"):
+        ok = install_asr(args.force)
+        ok = install_punctuation(args.force) and ok
+    if args.only in ("llm", "all"):
+        ok = (download(LLM_URLS, args.llm_dest, min_bytes=LLM_MIN_BYTES)
+              if args.llm_dest else install_llm(args.force)) and ok
     if not ok:
         print("模型下载未完成，请检查网络后重跑（已下载的部分会自动续传）")
         return 1

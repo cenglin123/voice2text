@@ -7,6 +7,10 @@ set "PYTHONNOUSERSITE=1"
 
 rem Probe each interpreter before use: a .venv whose base Python was uninstalled is broken
 set "PY="
+if exist "offline-bundle.txt" (
+    set "PY=runtime\python\python.exe"
+    goto launch
+)
 if exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -c "pass" >nul 2>&1 && set "PY=.venv\Scripts\python.exe"
 )
@@ -19,6 +23,7 @@ if not defined PY (
     exit /b 1
 )
 
+:launch
 if /i "%~1"=="--debug" goto debug
 set "PYW=%PY:python.exe=pythonw.exe%"
 if not exist "%PYW%" (

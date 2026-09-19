@@ -12,7 +12,7 @@
 ### 开发环境
 
 ```bash
-# Windows，Git Bash；本机已有 Python 3.10+
+# Windows，Git Bash；本机已有 Python 3.11–3.13 x64（含 tkinter）
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu/
 .venv/Scripts/python -m voice2text.main
@@ -20,8 +20,23 @@ python -m venv .venv
 
 ### 最终用户
 
-- `install.bat`：一键安装，自包含——检测本机 Python 3.10+（识别并跳过 Windows Store 假别名），缺失则下载 python-build-standalone 独立 CPython 到 runtime/（自带 tkinter，GUI 依赖）；然后装依赖（llama-cpp-python 走 abetlen wheel 索引）+ 下载识别模型、INT8 标点模型与校对 GGUF 到 models/
-- `run.bat`：启动常驻进程（控制台 + 托盘 + 悬浮窗，热键生效）；`run_gui.pyw` 为无控制台入口（开机自启动用）
+- 离线分发 ZIP：完整解压到可写目录，双击 `install.bat` 验证依赖与模型，再运行 `run.bat`。包内有独立 Python、全部依赖、语音和标点模型；基础安装不联网，也不依赖系统 Python。`offline-bundle.txt` 标记决定使用包内运行时。
+- 校对 GGUF 为可选组件：设置 → 识别与校对 → 下载校对模型（约 1.1 GB），完成后打开二次校对并保存。下载失败可重试，下载过程中仍可使用基础听写；关闭设置不终止下载，退出程序终止下载。网络仅用于用户明确触发的模型安装，推理全部在本地。
+- 源码仓库的 `install.bat` 在线准备环境：探测 Python 3.11–3.13 x64 和 Tk，不兼容时下载固定独立运行时，再安装依赖、下载模型。Python 的证书链失败时，模型下载可回退系统 curl，保持证书校验。
+- `run.bat` 默认无控制台，常驻托盘并显示悬浮窗；运行输出从设置或托盘打开。`run.bat --debug` 才显示控制台。
+
+### 制作离线分发包
+
+在 `dist/build-runtime/python` 准备固定的 python-build-standalone 3.11.9 x64，使用其 Python
+执行 `-I -X utf8 -m pip install --only-binary=:all: --find-links vendor -r requirements.txt`。
+`vendor` 需预先准备固定版本 llama wheel；构建运行时不得使用开发 `.venv` 或系统 Python 的目录副本。
+运行 `python scripts/build_release.py`，从干净运行时与 `models/` 中仅复制基础模型白名单，
+生成 `dist/voice2text-v0.1.0-windows-x64.zip` 和同名 `.sha256`。
+构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
+
+构建结构检查：`python scripts/check_release.py`。下载回归：
+`python scripts/check_download_models.py` 与 `python scripts/check_model_download.py`。
+最终包还必须在虚拟机独立目录验证，构建检查不能替代实际模型加载与 GUI 验收。
 
 ## 持久化与备份
 

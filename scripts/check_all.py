@@ -113,6 +113,15 @@ CHECKS.append(("死链", _check_dead_links,
               "检查标 dead 的链接目标是否确实不存在——可能是路径拼写或文件被移动"))
 
 
+def _check_release():
+    if not _has_file("scripts/build_release.py"):
+        return True, ""
+    return _run("发行包", ["scripts/check_release.py"])
+
+CHECKS.append(("发行包", _check_release,
+              "python scripts/check_release.py（检查白名单、默认配置、wheel 与 ZIP 布局）"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="高频完工检查器——无输出即通过")
     ap.add_argument("--quiet", action="store_true",
