@@ -26,6 +26,8 @@ _ACCENT = "#519CFF"
 _TRACK = "#132139"
 _SIDE = "#1B2D4B"
 _FONT = "Microsoft YaHei UI"
+_WINDOW_KEY = "#010203"
+_WINDOW_RADIUS = 14
 
 
 def _nav_icon(kind: str) -> ImageTk.PhotoImage:
@@ -338,13 +340,16 @@ class SettingsWindow:
         self.root.title("语音输入 设置")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.configure(bg=_CARD_EDGE, padx=1, pady=1)
+        self.root.configure(bg=_WINDOW_KEY)
         width = min(920, self.root.winfo_screenwidth() - 64)
         height = min(840, self.root.winfo_screenheight() - 80)
         self.root.geometry(f"{width}x{height}+{max(0, (self.root.winfo_screenwidth() - width) // 2)}+40")
+        self.root.after_idle(self._apply_window_rounding)
 
-        shell = tkinter.Frame(self.root, bg=_BG)
-        shell.pack(fill="both", expand=True)
+        border = tkinter.Frame(self.root, bg=_CARD_EDGE)
+        border.pack(fill="both", expand=True)
+        shell = tkinter.Frame(border, bg=_BG)
+        shell.pack(fill="both", expand=True, padx=1, pady=1)
         sidebar = tkinter.Frame(shell, bg=_SIDE, width=196)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
@@ -455,7 +460,7 @@ class SettingsWindow:
         self._sliders = []
         self._percent_vars = []
         for label, var, low, high, suffix in (("窗口大小", self._scale_var, 50, 150, "%"),
-                                      ("长宽比", self._aspect_var, 260, 500, ""),
+                                      ("长宽比", self._aspect_var, 100, 500, ""),
                                       ("不透明度", self._opacity_var, 30, 100, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
             row.pack(fill="x", pady=2)
@@ -498,6 +503,33 @@ class SettingsWindow:
         self._select_page("all")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.bind("<Escape>", lambda e: self._finish_capture(None) if self._capturing else self._close())
+        self.root.deiconify()
+        self.root.lift()
+
+    def _apply_window_rounding(self) -> None:
+        """用透明色角罩裁掉无边框设置窗的四个方形外角。"""
+        if not self.root.winfo_exists():
+            return
+        try:
+            self.root.attributes("-transparentcolor", _WINDOW_KEY)
+        except tkinter.TclError:
+            return
+        r = _WINDOW_RADIUS
+        specs = (
+            (0.0, 0.0, "nw", (0, 0, r * 2, r * 2)),
+            (1.0, 0.0, "ne", (-r, 0, r, r * 2)),
+            (0.0, 1.0, "sw", (0, -r, r * 2, r)),
+            (1.0, 1.0, "se", (-r, -r, r, r)),
+        )
+        self._corner_masks = []
+        for relx, rely, anchor, oval in specs:
+            corner = tkinter.Canvas(
+                self.root, width=r, height=r, bg=_WINDOW_KEY,
+                highlightthickness=0, borderwidth=0,
+            )
+            corner.create_oval(*oval, fill=_CARD_EDGE, outline=_CARD_EDGE)
+            corner.place(relx=relx, rely=rely, anchor=anchor)
+            self._corner_masks.append(corner)
 
     def _select_page(self, key: str) -> None:
         titles = {"all": ("常规", "自定义语音输入的使用体验"),
@@ -533,10 +565,20 @@ class SettingsWindow:
         canvas.delete("all")
         w = max(1, canvas.winfo_width())
         if self._preview_source is not None:
-            # 与实际悬浮窗共用同一帧，预览整体按 60% 展示，为最大尺寸留空间。
+            # 与实际悬浮窗共用同一帧；先按目标比例居中裁切，避免把内容横向压扁。
             source = self._preview_source
             height = max(1, round(104 * self._scale_var.get() / 100 * 0.6))
-            width = max(1, round(height * self._aspect_var.get() / 100))
+            aspect = self._aspect_var.get() / 100
+            width = max(1, round(height * aspect))
+            source_aspect = source.width / source.height
+            if aspect < source_aspect:
+                crop_w = max(1, round(source.height * aspect))
+                left = (source.width - crop_w) // 2
+                source = source.crop((left, 0, left + crop_w, source.height))
+            elif aspect > source_aspect:
+                crop_h = max(1, round(source.width / aspect))
+                top = (source.height - crop_h) // 2
+                source = source.crop((0, top, source.width, top + crop_h))
             image = source.resize((width, height), Image.Resampling.LANCZOS)
             image.putalpha(image.getchannel("A").point(lambda a: round(a * self._opacity_var.get() / 100)))
             self._preview_photo = ImageTk.PhotoImage(image)

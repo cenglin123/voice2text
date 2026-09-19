@@ -28,20 +28,26 @@ def main():
             if args.capture:
                 args.capture.parent.mkdir(parents=True, exist_ok=True)
                 x, y = window.root.winfo_x(), window.root.winfo_y()
-                window.root.after(250, window.root.quit)
+                def capture_window():
+                    ImageGrab.grab(bbox=(x - 8, y - 8,
+                                         x + window.root.winfo_width() + 8,
+                                         y + window.root.winfo_height() + 8)).save(args.capture)
+                    window.root.quit()
+                window.root.after(250, capture_window)
                 window.root.mainloop()
-                ImageGrab.grab(bbox=(x, y, x + window.root.winfo_width(),
-                                     y + window.root.winfo_height())).save(args.capture)
             assert isinstance(window._hotkey_entry, RoundedField)
             assert isinstance(window._hotkey_btn, RoundedButton)
+            assert len(window._corner_masks) == 4
+            assert window.root.attributes("-transparentcolor") == "#010203"
             assert window._hotkey_entry.coords(window._hotkey_entry._window)[0] == 13
-            window.sync_appearance(1.25, 4.2)
+            window.sync_appearance(1.25, 1.0)
             window.root.update()
             assert window._scale_var.get() == 125
-            assert window._aspect_var.get() == 420
+            assert window._aspect_var.get() == 100
+            assert window._preview_photo.width() == window._preview_photo.height() == 78
             window._save()
             assert applied[0]["widget_scale"] == 1.25
-            assert applied[0]["widget_aspect"] == 4.2
+            assert applied[0]["widget_aspect"] == 1.0
         finally:
             if window.root.winfo_exists():
                 window.root.destroy()

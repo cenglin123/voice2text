@@ -82,8 +82,33 @@ def main() -> None:
         widget._on_motion(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
                                           x_root=560, y_root=520))
         widget._on_release(SimpleNamespace(x=widget._w - 2, y=widget._h - 2))
-        assert resized and 0.5 <= resized[-1][0] <= 1.5 and 2.6 <= resized[-1][1] <= 5.0
+        assert resized and 0.5 <= resized[-1][0] <= 1.5 and 1.0 <= resized[-1][1] <= 5.0
         assert widget._w == round(widget._h * resized[-1][1])
+
+        # 1:1 使用独立紧凑布局，不能把横向布局直接挤进正方形。
+        widget.apply_appearance(1.0, 0.92, 1.0)
+        widget.set_state("listening")
+        square = widget.snapshot()
+        assert square.size == (104, 104)
+        assert square.getpixel((0, 0))[3] == 0
+        assert len(widget._wave_heights(round(23 * 3))) >= 3
+        for name, (x, y, _) in widget._hits.items():
+            assert 0 <= x < square.width and 0 <= y < square.height
+            assert widget._hit(x, y) == name
+        compact_hits = list(widget._hits.items())
+        for i, (_, (x1, y1, r1)) in enumerate(compact_hits):
+            for _, (x2, y2, r2) in compact_hits[i + 1:]:
+                assert (x1 - x2) ** 2 + (y1 - y2) ** 2 >= (r1 + r2) ** 2
+        for scale in (0.5, 1.5):
+            widget.apply_appearance(scale, 0.92, 1.0)
+            assert widget.snapshot().size == (round(104 * scale), round(104 * scale))
+
+        # 单击尺寸手柄不应透传为开始/停止听写。
+        before = len(calls)
+        widget._on_press(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
+                                         x_root=500, y_root=500))
+        widget._on_release(SimpleNamespace(x=widget._w - 2, y=widget._h - 2))
+        assert len(calls) == before
 
         # 持续重绘和重建圆角区域不应积累 GDI 对象。
         kernel = ctypes.WinDLL("kernel32")
@@ -128,6 +153,12 @@ def main() -> None:
                 widget.root.after(250, widget.root.quit)
                 widget.root.mainloop()
                 ImageGrab.grab(bbox=(60, 60, 720, 380)).save(args.capture_dir / f"widget-{state}.png")
+            widget.apply_appearance(1.0, 0.92, 1.0)
+            widget.set_state("listening")
+            widget.root.update()
+            widget.root.after(250, widget.root.quit)
+            widget.root.mainloop()
+            ImageGrab.grab(bbox=(175, 125, 329, 279)).save(args.capture_dir / "widget-square.png")
             backdrop.destroy()
 
         with patch.object(layered, "update", return_value=False):

@@ -11,10 +11,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from voice2text import layered
 
 SS = 3
-WIDTH = 360
-PAD = 10
-TOP_H = 66
-ROW_H = 50
+WIDTH = 308
+PAD = 8
+TOP_H = 58
+ROW_H = 42
 PANEL = (22, 31, 45, 248)
 TOP = (35, 46, 64, 255)
 HOVER = (43, 57, 78, 255)
@@ -50,6 +50,27 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
+def _hotkey_text(draw, combo: str, max_width: int):
+    """在固定右栏内完整显示快捷键；长组合改用紧凑拼写并逐级缩小。"""
+    aliases = {
+        "ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "Shift",
+        "page_down": "PgDn", "page_up": "PgUp", "print_screen": "PrtSc",
+        "backspace": "Bksp", "space": "Space", "escape": "Esc",
+        "media_volume_up": "Vol+", "media_volume_down": "Vol-",
+    }
+    parts = [aliases.get(part.lower(), part.replace("_", " ").title())
+             for part in combo.split("+")]
+    candidates = [" + ".join(parts), "+".join(parts)]
+    if len(parts) > 2:
+        candidates.append(f"{parts[0]}+…+{parts[-1]}")
+    for candidate in candidates:
+        for size in (12, 11, 10):
+            font = _font(size * SS)
+            if draw.textlength(candidate, font=font) <= max_width:
+                return candidate, font
+    return candidates[-1], _font(10 * SS)
+
+
 class TrayMenu:
     """不抢焦点的分层窗口，适合听写期间直接点“停止”。"""
 
@@ -63,7 +84,7 @@ class TrayMenu:
             ("terminal", lambda: "运行输出", "debug"),
             ("exit", lambda: "退出", "quit"),
         ]
-        self.height = PAD * 2 + TOP_H + ROW_H * len(self.rows) + 10
+        self.height = PAD * 2 + TOP_H + ROW_H * len(self.rows) + 8
         self.root = tkinter.Toplevel(master)
         self.root.withdraw()
         self.root.overrideredirect(True)
@@ -148,22 +169,26 @@ class TrayMenu:
         shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         sd = ImageDraw.Draw(shadow)
         box = [PAD * SS, PAD * SS, (WIDTH - PAD) * SS - 1, (self.height - PAD) * SS - 1]
-        sd.rounded_rectangle([v + 3 * SS for v in box], radius=18 * SS, fill=(0, 0, 0, 125))
+        sd.rounded_rectangle([v + 3 * SS for v in box], radius=16 * SS, fill=(0, 0, 0, 125))
         shadow = shadow.filter(ImageFilter.GaussianBlur(6 * SS))
         image.alpha_composite(shadow)
         d = ImageDraw.Draw(image)
-        d.rounded_rectangle(box, radius=18 * SS, fill=PANEL, outline=EDGE, width=SS)
+        d.rounded_rectangle(box, radius=16 * SS, fill=PANEL, outline=EDGE, width=SS)
 
-        left, right = 22 * SS, (WIDTH - 22) * SS
-        top_box = [left, 18 * SS, right, (PAD + TOP_H - 6) * SS]
-        d.rounded_rectangle(top_box, radius=12 * SS,
+        left, right = 18 * SS, (WIDTH - 18) * SS
+        top_box = [left, 14 * SS, right, (PAD + TOP_H - 5) * SS]
+        d.rounded_rectangle(top_box, radius=10 * SS,
                             fill=HOVER if self.hover == 0 else TOP)
         top_y = (PAD + TOP_H // 2) * SS
-        self._icon(d, "mic", 49 * SS, top_y, ACCENT)
+        self._icon(d, "mic", 41 * SS, top_y, ACCENT)
         label = "停止听写" if self.app.active else "开始听写"
-        d.text((84 * SS, top_y), label, anchor="lm", font=_font(18 * SS), fill=TEXT)
-        d.text(((WIDTH - 27) * SS, top_y), self.app.hotkey.combo.replace("+", " + ").title(),
-               anchor="rm", font=_font(13 * SS), fill=SUB)
+        d.text((70 * SS, top_y), label, anchor="lm", font=_font(16 * SS), fill=TEXT)
+        hotkey_right = (WIDTH - 22) * SS
+        hotkey_max = (WIDTH - 172) * SS
+        hotkey, hotkey_font = _hotkey_text(d, self.app.hotkey.combo, hotkey_max)
+        self._hotkey_display = hotkey
+        self._hotkey_width = d.textlength(hotkey, font=hotkey_font)
+        d.text((hotkey_right, top_y), hotkey, anchor="rm", font=hotkey_font, fill=SUB)
 
         start = PAD + TOP_H
         for i, (kind, label_fn, _) in enumerate(self.rows):
@@ -172,13 +197,13 @@ class TrayMenu:
                 d.rounded_rectangle([left, y0 + 3 * SS, right, y0 + (ROW_H - 3) * SS],
                                     radius=9 * SS, fill=HOVER)
             cy = y0 + ROW_H * SS // 2
-            self._icon(d, kind, 49 * SS, cy, SUB)
-            d.text((84 * SS, cy), label_fn(), anchor="lm", font=_font(16 * SS), fill=TEXT)
+            self._icon(d, kind, 41 * SS, cy, SUB)
+            d.text((70 * SS, cy), label_fn(), anchor="lm", font=_font(14 * SS), fill=TEXT)
             if kind in {"gear", "book", "terminal"}:
-                self._chevron(d, (WIDTH - 32) * SS, cy, SUB)
+                self._chevron(d, (WIDTH - 27) * SS, cy, SUB)
             if i in (1, 3):
                 line_y = y0 + ROW_H * SS
-                d.line([30 * SS, line_y, (WIDTH - 30) * SS, line_y], fill=(61, 73, 91, 180), width=SS)
+                d.line([26 * SS, line_y, (WIDTH - 26) * SS, line_y], fill=(61, 73, 91, 180), width=SS)
 
         small = image.resize((WIDTH, self.height), Image.Resampling.LANCZOS)
         self._last_image = small

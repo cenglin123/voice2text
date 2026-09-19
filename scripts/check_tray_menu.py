@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from PIL import ImageGrab
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from voice2text.tray_menu import PAD, TOP_H, ROW_H, TrayMenu
+from voice2text.tray_menu import PAD, TOP_H, ROW_H, WIDTH, TrayMenu
 from voice2text.tray import build_tray
 
 
@@ -72,8 +72,11 @@ def main():
             menu._click(SimpleNamespace(y=PAD + TOP_H // 2))
         assert calls == ["toggle"] and not menu.visible, (calls, debug, menu.hwnd)
         app.active = True
+        app.hotkey.combo = "ctrl+alt+shift+page_down"
         menu.show(900, 760)
         root.update()
+        assert menu._hotkey_display.endswith("PgDn")
+        assert menu._hotkey_width <= (WIDTH - 172) * 3
         # 第二次打开验证动态文案和命令映射；一次真实 Win32 点击已覆盖 NOACTIVATE 路由。
         menu._click(SimpleNamespace(y=PAD + TOP_H + ROW_H * 4 + 5))
         assert calls[-1] == "quit"

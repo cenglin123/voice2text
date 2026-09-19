@@ -20,7 +20,7 @@ from voice2text import layered
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 104
-MIN_ASPECT, MAX_ASPECT = 2.6, 5.0
+MIN_ASPECT, MAX_ASPECT = 1.0, 5.0
 CORNER_RADIUS = 22
 SS = 3  # 超采样倍数
 
@@ -165,6 +165,7 @@ class DictationWidget:
 
         accent = _STATE_COLOR.get(self._state, IDLE_RING)
         accent255 = (*accent, 255)
+        compact = self._aspect < 2.2
 
         # 左上：品牌格点 + 标题（与右侧按钮同一水平线）
         unit = self._scale * SS
@@ -179,45 +180,51 @@ class DictationWidget:
                     [gx + dx * gap, gy + dy * gap, gx + dx * gap + gs, gy + dy * gap + gs],
                     radius=max(1, round(unit)), fill=(170, 184, 204, 255),
                 )
-        f_title = _font(round(11 * unit))
-        d.text((round(39 * unit), row_cy), "语音输入", anchor="lm",
-               font=f_title, fill=(185, 198, 218, 255))
+        if not compact:
+            f_title = _font(round(11 * unit))
+            d.text((round(39 * unit), row_cy), "语音输入", anchor="lm",
+                   font=f_title, fill=(185, 198, 218, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
-        gear_cx = W - round(67 * unit)
-        div_x = W - round(47 * unit)
-        close_cx = W - round(27 * unit)
-        self._draw_gear(d, gear_cx, row_cy, round(7 * unit), (170, 184, 204, 255))
-        d.line([div_x, row_cy - 8 * unit, div_x, row_cy + 8 * unit],
+        gear_cx = W - round((47 if compact else 67) * unit)
+        div_x = W - round((31 if compact else 47) * unit)
+        close_cx = W - round((16 if compact else 27) * unit)
+        self._draw_gear(d, gear_cx, row_cy, round((6 if compact else 7) * unit), (170, 184, 204, 255))
+        d.line([div_x, row_cy - 7 * unit, div_x, row_cy + 7 * unit],
                fill=(67, 83, 107, 200), width=max(1, round(unit)))
         r_x = round(5 * unit)
         d.line([close_cx - r_x, row_cy - r_x, close_cx + r_x, row_cy + r_x], fill=(178, 190, 206, 255), width=max(1, round(1.2 * unit)))
         d.line([close_cx - r_x, row_cy + r_x, close_cx + r_x, row_cy - r_x], fill=(178, 190, 206, 255), width=max(1, round(1.2 * unit)))
         # 命中区（最终像素坐标）
         self._hits = {
-            "gear": (gear_cx // SS, row_cy // SS, int(16 * self._scale)),
-            "close": (close_cx // SS, row_cy // SS, int(14 * self._scale)),
+            "gear": (gear_cx // SS, row_cy // SS, int((13 if compact else 16) * self._scale)),
+            "close": (close_cx // SS, row_cy // SS, int((12 if compact else 14) * self._scale)),
         }
 
         # 中央：麦克风圆环 + 麦克风
-        mr = round(26 * unit)
-        mcx, mcy = W // 2, round(46 * unit)
+        mr = round((23 if compact else 26) * unit)
+        mcx, mcy = W // 2, round((54 if compact else 46) * unit)
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=(*CIRCLE_FILL, 155 if self._glass else 255))
         ring_w = max(1, round((1.2 if self._state in ("idle", "loading") else 1.6) * unit))
         d.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], outline=accent255, width=ring_w)
-        self._hits["mic"] = (mcx // SS, mcy // SS, int(mr / SS * 1.2))
+        mic_hit = int(18 * self._scale) if compact else int(mr / SS * 1.2)
+        self._hits["mic"] = (mcx // SS, mcy // SS, mic_hit)
         self._draw_mic(d, mcx, mcy, mr, (*IDLE_MIC, 255) if self._state == "idle" else accent255)
 
         # 声波（聆听）或旋转指示（校对/加载）
         if self._state == "listening":
             heights = self._wave_heights(mr)
+            if compact:
+                heights = heights[:3]
             bar_w = max(2, round(2.5 * unit))
             for i, hh in enumerate(heights):
-                x = mcx - mr - int(10 * self._scale * SS) - i * int(8 * self._scale * SS)
+                start_gap = 5 if compact else 10
+                bar_gap = 5 if compact else 8
+                x = mcx - mr - int(start_gap * self._scale * SS) - i * int(bar_gap * self._scale * SS)
                 fade = 1 - i * 0.12
                 col = tuple(round(c * fade) for c in LISTEN) + (255,)
                 d.rounded_rectangle([x - bar_w // 2, mcy - hh, x + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
-                x2 = mcx + mr + int(10 * self._scale * SS) + i * int(8 * self._scale * SS)
+                x2 = mcx + mr + int(start_gap * self._scale * SS) + i * int(bar_gap * self._scale * SS)
                 d.rounded_rectangle([x2 - bar_w // 2, mcy - hh, x2 + bar_w // 2, mcy + hh], radius=bar_w // 2, fill=col)
         elif self._state in ("proofreading", "loading"):
             start_a = (self._phase * 240) % 360
@@ -225,9 +232,9 @@ class DictationWidget:
                   fill=accent255, width=int(2 * SS))
 
         # 状态文字
-        f_status = _font(round(11 * unit))
+        f_status = _font(round((9 if compact else 11) * unit))
         text = STATUS_TEXT.get(self._state, "")
-        d.text((W / 2, round(86 * unit)), text, anchor="mm", font=f_status, fill=(232, 237, 244, 255))
+        d.text((W / 2, round((89 if compact else 86) * unit)), text, anchor="mm", font=f_status, fill=(232, 237, 244, 255))
 
         # 右下角尺寸手柄：足够克制，但让“可调整大小”可以被发现。
         grip = round(8 * unit)
@@ -423,7 +430,7 @@ class DictationWidget:
     def _on_release(self, ev) -> None:
         if self._resizing and self._drag_moved and self._on_resize:
             self._on_resize(self._scale, self._aspect)
-        if not self._drag_moved and self._drag_off is not None:
+        if not self._resizing and not self._drag_moved and self._drag_off is not None:
             kind = self._hit(ev.x, ev.y)
             if kind == "gear" and self._on_settings:
                 self._on_settings()
