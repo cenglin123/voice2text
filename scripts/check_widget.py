@@ -73,6 +73,18 @@ def main() -> None:
         widget.root.update()
         assert widget.root.winfo_viewable()
 
+        # 右下角拖动会同时更新缩放和长宽比，并在释放时同步给配置层。
+        resized = []
+        widget._on_resize = lambda scale, aspect: resized.append((scale, aspect))
+        widget.apply_appearance(1.0, 0.92, 340 / 104)
+        widget._on_press(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
+                                         x_root=500, y_root=500))
+        widget._on_motion(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
+                                          x_root=560, y_root=520))
+        widget._on_release(SimpleNamespace(x=widget._w - 2, y=widget._h - 2))
+        assert resized and 0.5 <= resized[-1][0] <= 1.5 and 2.6 <= resized[-1][1] <= 5.0
+        assert widget._w == round(widget._h * resized[-1][1])
+
         # 持续重绘和重建圆角区域不应积累 GDI 对象。
         kernel = ctypes.WinDLL("kernel32")
         kernel.GetCurrentProcess.restype = wintypes.HANDLE

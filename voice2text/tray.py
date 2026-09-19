@@ -26,7 +26,8 @@ def build_tray(cmd_queue: "queue.Queue[tuple]", app, hotkey: str = "alt+v") -> p
 
     menu = pystray.Menu(
         pystray.MenuItem(
-            lambda item: "停止听写" if app.active else "开始听写",
+            lambda item: (f"停止听写（{app.hotkey.combo}）" if app.active
+                          else f"开始听写（{app.hotkey.combo}）"),
             _put("toggle"),
             default=True,
         ),
@@ -36,6 +37,7 @@ def build_tray(cmd_queue: "queue.Queue[tuple]", app, hotkey: str = "alt+v") -> p
         ),
         pystray.MenuItem("设置", _put("settings")),
         pystray.MenuItem("使用帮助", _put("help")),
+        pystray.MenuItem("查看运行输出（调试）", _put("debug")),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("退出", _put("quit")),
     )

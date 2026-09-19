@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import queue
+import json
 import sys
 import threading
 import time
@@ -74,8 +75,11 @@ class DictationApp:
         self.widget_visible = True  # 托盘动态文案用（UI 侧维护）
         self._active = False
         self._busy = False  # 启动/停止进行中，忽略新的切换请求
-        self.apply_settings_scale: tuple[float, float] | None = None  # 设置保存后待应用的外观
+        self.apply_settings_scale: tuple[float, float, float] | None = None  # 缩放、透明度、长宽比
         self._models_ready = threading.Event()  # 预加载完成（成功与否都置位）
+        self._closing = False
+        self._session_thread: threading.Thread | None = None
+        self._activity_guard = None
 
     @property
     def active(self) -> bool:
@@ -109,8 +113,8 @@ class DictationApp:
         threading.Thread(target=_load, daemon=True).start()
 
     def request_toggle(self) -> None:
-        """UI/热键请求切换。busy 或模型未就绪时忽略。"""
-        if self._busy:
+        """开始时同步捕获目标，焦点锁定持续到尾句与校对全部结束。"""
+        if self._busy or self._closing:
             return
         if not self._models_ready.is_set():
             print("[提示] 模型加载中，请稍候再试")
@@ -118,25 +122,58 @@ class DictationApp:
         self._busy = True
         if self._active:
             self.push_state("proofreading")
-            threading.Thread(target=self._finish_toggle, daemon=True).start()
+            self._session_thread = threading.Thread(target=self._finish_toggle, daemon=True)
         else:
-            threading.Thread(target=self._start_toggle, daemon=True).start()
+            try:
+                from voice2text.activity import InputActivityGuard
+                target = self._inserter.capture_target()
+                if self._activity_guard is not None:
+                    self._activity_guard.close()
+                self._activity_guard = InputActivityGuard(self._inserter, self._cfg.hotkey)
+                self._inserter.begin_session(target)
+                print(f"[目标锁定] {target.process}，听写至校对完成前保持原窗口焦点")
+            except Exception as exc:
+                self._busy = False
+                print(f"[听写未开始] {exc}")
+                self.push_state("error")
+                return
+            self._session_thread = threading.Thread(target=self._start_toggle, daemon=True)
+        self._session_thread.start()
 
     def _start_toggle(self) -> None:
+        import pythoncom
+        pythoncom.CoInitialize()
         try:
             self._start_session()
             self.push_state("listening" if self._active else "idle")
+        except Exception as exc:
+            print(f"[听写未开始] {exc}")
+            self._capture.stop()
+            self.push_state("error")
         finally:
+            if not self._active:
+                self._inserter.end_session()
             self._busy = False
+            pythoncom.CoUninitialize()
 
     def _finish_toggle(self) -> None:
+        import pythoncom
+        pythoncom.CoInitialize()
         try:
             self._stop_session()
-            self.push_state("idle")
+            self.push_state("error" if self._inserter.aborted else "idle")
+        except Exception as exc:
+            print(f"[停止异常] {exc}")
+            self.push_state("error")
         finally:
+            self._inserter.end_session()
+            self._active = False
             self._busy = False
+            pythoncom.CoUninitialize()
 
     def _start_session(self) -> None:
+        if self._closing or not self._inserter.guard_focus():
+            return
         if self._asr is None:
             print("  （首次会话：加载识别模型…）")
             try:
@@ -158,7 +195,9 @@ class DictationApp:
             return
         self._session_gen += 1
         gen = self._session_gen
-        self._inserter.begin_session()
+        if self._closing or self._inserter.aborted:
+            self._capture.stop()
+            return
         self._locked_sentences = []
         self._worker = ASRSessionWorker(
             asr=self._asr,
@@ -173,13 +212,14 @@ class DictationApp:
         print(f"[听写中] 再按 {self._cfg.hotkey} 停止")
 
     def _stop_session(self) -> None:
-        self._session_gen += 1  # 拦截 join 超时后残留 worker 的迟到提交/替换
         self._capture.stop()  # None 哨兵 → 识别线程完成尾句后退出
         if self._worker is not None:
             self._worker.join(timeout=5.0)
             if self._worker.is_alive():
                 print("[警告] 识别线程未在预期内结束（其迟到回调会被会话代数拦截）")
+                self._inserter.abort("识别线程停止超时，保留已上屏内容")
             self._worker = None
+        self._session_gen += 1  # 正常尾句已排空，此后拦截迟到回调
         self._finalize_proofread()
         self._inserter.end_session()
         self._active = False
@@ -198,8 +238,12 @@ class DictationApp:
         shift = 0
         optimized = 0
         for start, end, text in chunks:
+            if self._closing or self._inserter.aborted:
+                break
             t0 = time.monotonic()
             corrected = self._proofreader.proofread(text)
+            if self._closing or self._inserter.aborted:
+                break
             if corrected is None or time.monotonic() - t0 > self._cfg.proofread_timeout_seconds:
                 continue
             if self._inserter.replace_committed_range(start - shift, end - shift, corrected):
@@ -233,6 +277,9 @@ class DictationApp:
 
     def tick(self) -> None:
         """轮询热键/托盘命令/错误条件。必须在主线程、非阻塞。"""
+        if not self._active and not self._busy and self._activity_guard is not None:
+            self._activity_guard.close()
+            self._activity_guard = None
         if self.hotkey is not None and self.hotkey.wait_toggle(0):
             self.hotkey.clear_toggle()
             self.request_toggle()
@@ -253,7 +300,7 @@ class DictationApp:
 
         if self._active and not self._busy:
             if self._capture.error or self._inserter.aborted:
-                reason = self._capture.error or "剪贴板模式持续被占用，上屏已暂停"
+                reason = self._capture.error or self._inserter.abort_reason or "上屏失败，已停止输入"
                 print(f"[听写中断] {reason}")
                 self.push_state("proofreading")
                 self._busy = True
@@ -263,6 +310,22 @@ class DictationApp:
                 self.push_state("proofreading")
                 self._busy = True
                 threading.Thread(target=self._finish_toggle, daemon=True).start()
+
+    def shutdown(self) -> None:
+        """先关写入闸门，防止退出过程中的迟到识别/校对继续写入。"""
+        self._closing = True
+        self._inserter.end_session()
+        if self._activity_guard is not None:
+            self._activity_guard.close()
+            self._activity_guard = None
+        self._session_gen += 1
+        self._capture.stop()
+        if self.hotkey is not None:
+            self.hotkey.shutdown()
+        if self._worker is not None:
+            self._worker.join(timeout=1.0)
+        if self._session_thread is not None and self._session_thread is not threading.current_thread():
+            self._session_thread.join(timeout=1.0)
 
     def apply_settings(self, cfg_dict: dict) -> dict:
         """设置窗口保存回调（主线程）：热键重注册；返回生效值供写盘。
@@ -282,12 +345,13 @@ class DictationApp:
         self._cfg.proofread_enabled = bool(cfg_dict.get("proofread_enabled", True))
         self._cfg.sound_cue = bool(cfg_dict.get("sound_cue", True))
         self._cfg.widget_scale = float(cfg_dict.get("widget_scale", 1.0))
+        self._cfg.widget_aspect = float(cfg_dict.get("widget_aspect", 3.27))
         self._cfg.widget_opacity = float(cfg_dict.get("widget_opacity", 0.92))
-        self.apply_settings_scale = (self._cfg.widget_scale, self._cfg.widget_opacity)
+        self.apply_settings_scale = (self._cfg.widget_scale, self._cfg.widget_opacity, self._cfg.widget_aspect)
         return dict(cfg_dict)
 
 
-def _gui_main() -> int:
+def _gui_main(output) -> int:
     cfg = load_config()
     print(f"voice2text v{__version__}  热键: {cfg.hotkey}")
     ok, missing_detail = check_models(cfg)
@@ -314,6 +378,7 @@ def _gui_main() -> int:
     from voice2text.settings_window import SettingsWindow
     from voice2text.tray import build_tray, update_icon
     from voice2text.widget import DictationWidget
+    from voice2text.desktop import DebugWindow
 
     app = DictationApp(cfg)
     try:
@@ -322,7 +387,21 @@ def _gui_main() -> int:
         print(f"[错误] 全局热键初始化失败：{exc}")
         return 1
 
-    ui = types.SimpleNamespace(widget=None, settings=None, tray=None, visible=True)
+    ui = types.SimpleNamespace(widget=None, settings=None, tray=None, debug=None, visible=True)
+
+    def widget_resized(scale: float, aspect: float) -> None:
+        """悬浮窗拖拽结束后同步内存、设置窗和配置文件。"""
+        cfg.widget_scale = round(scale, 2)
+        cfg.widget_aspect = round(aspect, 2)
+        if ui.settings is not None and ui.settings.root.winfo_exists():
+            ui.settings.sync_appearance(cfg.widget_scale, cfg.widget_aspect)
+        path = PROJECT_ROOT / "config.json"
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            saved = {}
+        saved.update({"widget_scale": cfg.widget_scale, "widget_aspect": cfg.widget_aspect})
+        path.write_text(json.dumps(saved, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def hide_widget() -> None:
         ui.widget.hide()
@@ -339,11 +418,13 @@ def _gui_main() -> int:
 
     ui.widget = DictationWidget(
         scale=cfg.widget_scale,
+        aspect=cfg.widget_aspect,
         opacity=cfg.widget_opacity,
         on_toggle=app.request_toggle,
         on_settings=lambda: app.cmd_queue.put(("settings", None)),
         on_hide=hide_widget,
         on_quit=quit_app,
+        on_resize=widget_resized,
     )
 
     def drain_cmds() -> None:
@@ -358,11 +439,15 @@ def _gui_main() -> int:
             elif cmd == "toggle_widget":
                 (hide_widget if ui.visible else show_widget)()
             elif cmd == "settings":
+                if app._active or app._busy:
+                    print("[提示] 请先停止听写并等待校对结束，再打开设置")
+                    continue
                 w = ui.settings
                 if w is None or not w.root.winfo_exists():
                     cfg_dict = {
                         "hotkey": cfg.hotkey,
                         "widget_scale": cfg.widget_scale,
+                        "widget_aspect": cfg.widget_aspect,
                         "widget_opacity": cfg.widget_opacity,
                         "proofread_enabled": cfg.proofread_enabled,
                         "sound_cue": cfg.sound_cue,
@@ -372,7 +457,18 @@ def _gui_main() -> int:
                     w.root.attributes("-topmost", True)
                     w.root.lift()
             elif cmd == "help":
+                if app._active or app._busy:
+                    print("[提示] 完成听写和校对后可打开帮助")
+                    continue
                 os.startfile(str(PROJECT_ROOT / "README.md"))  # noqa: S606
+            elif cmd == "debug":
+                if app._active or app._busy:
+                    print("[提示] 正在保持输入焦点，完成听写和校对后可查看运行输出")
+                    continue
+                if ui.debug is None or not ui.debug.root.winfo_exists():
+                    ui.debug = DebugWindow(ui.widget.root, output)
+                else:
+                    ui.debug.show()
             elif cmd == "quit":
                 raise SystemExit
 
@@ -384,9 +480,14 @@ def _gui_main() -> int:
         drain_cmds()
         app.tick()
         if app.apply_settings_scale:  # 设置保存后应用新外观（M1/M2：主线程 ui.widget）
-            widget_scale, widget_opacity = app.apply_settings_scale
-            ui.widget.apply_appearance(widget_scale, widget_opacity)
+            widget_scale, widget_opacity, widget_aspect = app.apply_settings_scale
+            ui.widget.apply_appearance(widget_scale, widget_opacity, widget_aspect)
             app.apply_settings_scale = None
+            try:
+                ui.tray.title = f"voice2text 语音输入（{app.hotkey.combo}）"
+                ui.tray.update_menu()
+            except Exception:  # noqa: BLE001
+                pass
         # 托盘与悬浮窗严格同源：状态或可见性变化 → 图标与菜单文案一起刷新
         if ui.widget.state != last_state[0] or ui.visible != last_visible[0]:
             state_changed = ui.widget.state != last_state[0]
@@ -407,11 +508,7 @@ def _gui_main() -> int:
             tick()
         except SystemExit:
             try:
-                if app.active:
-                    app._capture.stop()
-                    app._inserter.end_session()
-                if app.hotkey is not None:
-                    app.hotkey.shutdown()
+                app.shutdown()
             except Exception:  # noqa: BLE001
                 pass
             try:
@@ -429,17 +526,32 @@ def _gui_main() -> int:
     ui.tray = build_tray(app.cmd_queue, app, hotkey=cfg.hotkey)
     threading.Thread(target=ui.tray.run, daemon=True).start()
     app.preload_models()  # 后台加载模型（悬浮窗"加载中"，完成后"待命中"）
+    def keep_target() -> None:
+        if not app._closing:
+            app._inserter.guard_focus()
+            ui.widget.root.after(40, keep_target)
+    keep_target()
     loop()
     ui.widget.root.mainloop()
     return 0
 
 
-def main() -> int:
-    # pythonw 下 stdout/stderr 为 None，print 会崩——重定向到 devnull
-    if sys.stdout is None or sys.stderr is None:
-        devnull = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
-        sys.stdout = sys.stderr = devnull
-    return _gui_main()
+def main(output=None) -> int:
+    import pythoncom
+    pythoncom.CoInitialize()
+    from voice2text.desktop import SingleInstance, install_output
+    if output is None:
+        output = install_output()
+    instance = SingleInstance()
+    try:
+        if instance.already_running:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, "voice2text 已在运行，请查看右下角托盘。", "voice2text", 0x40)
+            return 0
+        return _gui_main(output)
+    finally:
+        instance.close()
+        pythoncom.CoUninitialize()
 
 
 if __name__ == "__main__":

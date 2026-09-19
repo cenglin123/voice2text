@@ -214,6 +214,81 @@ class Slider(tkinter.Canvas):
         self._draw()
 
 
+class RoundedButton(tkinter.Canvas):
+    """统一的圆角按钮/侧栏项。"""
+
+    def __init__(self, master, text: str, command, width=120, height=42, bg="#304766",
+                 fg=_TEXT, active=_ACCENT, image=None, bold=False, anchor="center"):
+        super().__init__(master, width=width, height=height, bg=master["bg"],
+                         highlightthickness=0, cursor="hand2", takefocus=True)
+        self._text, self._command = text, command
+        self._fill, self._fg, self._active = bg, fg, active
+        self._icon, self._bold, self._anchor = image, bold, anchor
+        self._pressed = False
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Enter>", lambda e: self._draw(True))
+        self.bind("<Leave>", lambda e: self._draw(False))
+        self.bind("<ButtonPress-1>", lambda e: setattr(self, "_pressed", True))
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Return>", lambda e: self._command())
+        self.bind("<space>", lambda e: self._command())
+        self._draw()
+
+    def set_style(self, *, text=None, bg=None, fg=None) -> None:
+        if text is not None:
+            self._text = text
+        if bg is not None:
+            self._fill = bg
+        if fg is not None:
+            self._fg = fg
+        self._draw()
+
+    def _draw(self, hover=False) -> None:
+        self.delete("all")
+        w, h = max(2, self.winfo_width()), max(2, self.winfo_height())
+        self._surface = _surface(w, h, 8, self._active if hover else self._fill)
+        self.create_image(0, 0, image=self._surface, anchor="nw")
+        if self._anchor == "w":
+            x = 18
+            if self._icon is not None:
+                self.create_image(x, h // 2, image=self._icon, anchor="w")
+                x += 34
+            self.create_text(x, h // 2, text=self._text, anchor="w", fill=self._fg,
+                             font=(_FONT, -14, "bold" if self._bold else "normal"))
+        else:
+            self.create_text(w // 2, h // 2, text=self._text, fill=self._fg,
+                             font=(_FONT, -14, "bold" if self._bold else "normal"))
+
+    def _release(self, ev) -> None:
+        was_pressed, self._pressed = self._pressed, False
+        if was_pressed and 0 <= ev.x < self.winfo_width() and 0 <= ev.y < self.winfo_height():
+            self._command()
+
+
+class RoundedField(tkinter.Canvas):
+    """带真实左内边距的圆角只读文本框。"""
+
+    def __init__(self, master, variable: tkinter.StringVar):
+        super().__init__(master, height=42, bg=master["bg"], highlightthickness=0, takefocus=False)
+        self.entry = tkinter.Entry(self, textvariable=variable, state="readonly",
+                                   readonlybackground=_TRACK, fg=_TEXT,
+                                   font=(_FONT, -15), relief="flat", bd=0)
+        self._window = self.create_window(13, 21, window=self.entry, anchor="w", height=30)
+        self.bind("<Configure>", self._layout)
+        self._layout()
+
+    def _layout(self, _ev=None) -> None:
+        w = max(40, self.winfo_width())
+        self._surface = _surface(w, 42, 8, _TRACK, _CARD_EDGE)
+        self.delete("surface")
+        self.create_image(0, 0, image=self._surface, anchor="nw", tags="surface")
+        self.tag_lower("surface")
+        self.itemconfigure(self._window, width=max(10, w - 26))
+
+    def set_foreground(self, color: str) -> None:
+        self.entry.config(fg=color)
+
+
 # ---- 组合串规范化 ----
 
 _MOD_CTRL = 0x0004
@@ -282,12 +357,10 @@ class SettingsWindow:
         for key, label in (("all", "常规"), ("hotkey", "快捷键"),
                            ("appearance", "外观"), ("features", "识别与校对")):
             self._nav_images[key] = _nav_icon(key)
-            button = tkinter.Button(
-                sidebar, text="  " + label, image=self._nav_images[key], compound="left",
-                anchor="w", font=(_FONT, -15),
-                bg=_SIDE, fg=_SUB, activebackground="#304A70", activeforeground=_TEXT,
-                relief="flat", bd=0, padx=14, pady=12, cursor="hand2",
-                command=lambda name=key: self._select_page(name),
+            button = RoundedButton(
+                sidebar, label, command=lambda name=key: self._select_page(name),
+                width=172, height=52, bg=_SIDE, fg=_SUB, active="#304A70",
+                image=self._nav_images[key], anchor="w",
             )
             button.pack(fill="x", padx=12, pady=3)
             self._nav[key] = button
@@ -323,13 +396,11 @@ class SettingsWindow:
         footer.pack(side="bottom", fill="x", padx=28, pady=16)
         tkinter.Label(footer, text="更改将在保存后生效", bg=_BG, fg=_SUB,
                       font=(_FONT, -12)).pack(side="left")
-        self._save_btn = tkinter.Button(footer, text="保存并应用", command=self._save,
-                       bg=_ACCENT, fg="#FFFFFF", activebackground="#70AEFF", activeforeground="#FFFFFF",
-                       relief="flat", bd=0, font=(_FONT, -14, "bold"), padx=22, pady=9, cursor="hand2")
+        self._save_btn = RoundedButton(footer, "保存并应用", self._save, width=124, height=44,
+                                       bg=_ACCENT, fg="#FFFFFF", active="#70AEFF", bold=True)
         self._save_btn.pack(side="right")
-        tkinter.Button(footer, text="取消", command=self._close, bg=_BG, fg=_SUB,
-                       activebackground=_CARD, activeforeground=_TEXT, relief="flat", bd=0,
-                       font=(_FONT, -14), padx=16, pady=9, cursor="hand2").pack(side="right", padx=(0, 8))
+        RoundedButton(footer, "取消", self._close, width=74, height=44,
+                      bg=_BG, fg=_SUB, active=_CARD).pack(side="right", padx=(0, 8))
 
         viewport = tkinter.Frame(main, bg=_BG)
         viewport.pack(fill="both", expand=True, padx=(28, 16))
@@ -371,38 +442,33 @@ class SettingsWindow:
         row = tkinter.Frame(c1, bg=_CARD)
         row.pack(fill="x", pady=(0, 2))
         self._hotkey_var = tkinter.StringVar(value=self._display_combo(self._cfg["hotkey"]))
-        self._hotkey_entry = tkinter.Entry(
-            row, textvariable=self._hotkey_var, state="readonly", readonlybackground=_TRACK,
-            fg=_TEXT, insertbackground=_TEXT, font=(_FONT, -15), relief="flat",
-            highlightthickness=1, highlightbackground=_CARD_EDGE, highlightcolor=_ACCENT,
-        )
-        self._hotkey_entry.pack(side="left", fill="x", expand=True, ipady=7)
-        self._hotkey_btn = tkinter.Button(
-            row, text="修改", command=self._start_capture, bg="#304766", fg=_TEXT,
-            activebackground=_ACCENT, activeforeground="#FFFFFF", relief="flat",
-            font=(_FONT, -13), bd=0, padx=18, pady=8, cursor="hand2",
-        )
+        self._hotkey_entry = RoundedField(row, self._hotkey_var)
+        self._hotkey_entry.pack(side="left", fill="x", expand=True)
+        self._hotkey_btn = RoundedButton(row, "修改", self._start_capture,
+                                         width=72, height=42, bg="#304766", active=_ACCENT)
         self._hotkey_btn.pack(side="left", padx=(10, 0))
 
         c2 = card("appearance", "悬浮窗设置", "调整大小与不透明度，在下方预览效果")
         self._scale_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_scale", 1.0)) * 100))
+        self._aspect_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_aspect", 3.27)) * 100))
         self._opacity_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_opacity", 0.92)) * 100))
         self._sliders = []
         self._percent_vars = []
-        for label, var, low, high in (("窗口大小", self._scale_var, 50, 150),
-                                      ("不透明度", self._opacity_var, 30, 100)):
+        for label, var, low, high, suffix in (("窗口大小", self._scale_var, 50, 150, "%"),
+                                      ("长宽比", self._aspect_var, 260, 500, ""),
+                                      ("不透明度", self._opacity_var, 30, 100, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
             row.pack(fill="x", pady=2)
             tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
                           font=(_FONT, -13)).pack(side="left")
-            pct = tkinter.StringVar(value=f"{var.get():.0f}%")
+            pct = tkinter.StringVar(value=(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}"))
             self._percent_vars.append(pct)
             tkinter.Label(row, textvariable=pct, bg=_CARD, fg=_SUB, width=5, anchor="e",
                           font=(_FONT, -13)).pack(side="right")
             slider = Slider(row, var, minimum=low, maximum=high)
             slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
             self._sliders.append(slider)
-            var.trace_add("write", lambda *_, v=var, text=pct: self._appearance_changed(v, text))
+            var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
         self._preview = tkinter.Canvas(c2, height=118, bg=_CARD, highlightthickness=0)
         self._preview.pack(fill="x", pady=(6, 0))
         self._preview.bind("<Configure>", lambda e: self._draw_preview())
@@ -441,8 +507,8 @@ class SettingsWindow:
         self._heading.config(text=titles[key][0])
         self._subtitle.config(text=titles[key][1])
         for name, button in self._nav.items():
-            button.config(bg="#304A70" if name == key else _SIDE,
-                          fg=_TEXT if name == key else _SUB)
+            button.set_style(bg="#304A70" if name == key else _SIDE,
+                             fg=_TEXT if name == key else _SUB)
         for name, panel in self._cards.items():
             panel.pack_forget()
             if key == "all" or name == key:
@@ -456,8 +522,8 @@ class SettingsWindow:
         if bounds and bounds[3] > self._scroll.winfo_height():
             self._scroll.yview_scroll(-int(ev.delta / 120), "units")
 
-    def _appearance_changed(self, var, text) -> None:
-        text.set(f"{var.get():.0f}%")
+    def _appearance_changed(self, var, text, suffix="%") -> None:
+        text.set(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}")
         self._draw_preview()
 
     def _draw_preview(self) -> None:
@@ -468,9 +534,10 @@ class SettingsWindow:
         w = max(1, canvas.winfo_width())
         if self._preview_source is not None:
             # 与实际悬浮窗共用同一帧，预览整体按 60% 展示，为最大尺寸留空间。
-            ratio = self._scale_var.get() / 100 / self._preview_scale * 0.6
             source = self._preview_source
-            image = source.resize((max(1, round(source.width * ratio)), max(1, round(source.height * ratio))), Image.Resampling.LANCZOS)
+            height = max(1, round(104 * self._scale_var.get() / 100 * 0.6))
+            width = max(1, round(height * self._aspect_var.get() / 100))
+            image = source.resize((width, height), Image.Resampling.LANCZOS)
             image.putalpha(image.getchannel("A").point(lambda a: round(a * self._opacity_var.get() / 100)))
             self._preview_photo = ImageTk.PhotoImage(image)
             canvas.create_image(w // 2, 50, image=self._preview_photo)
@@ -503,8 +570,8 @@ class SettingsWindow:
         if self._capturing:
             return
         self._capturing = True
-        self._hotkey_btn.config(text="按组合键…", bg=_ACCENT)
-        self._hotkey_entry.config(fg=_ACCENT)
+        self._hotkey_btn.set_style(text="按组合键…", bg=_ACCENT)
+        self._hotkey_entry.set_foreground(_ACCENT)
         self._hotkey_var.set("")
 
         def capture_key(ev):
@@ -529,8 +596,8 @@ class SettingsWindow:
         if getattr(self, "_capture_binding", None):
             self.root.unbind("<Key>", self._capture_binding)
             self._capture_binding = None
-        self._hotkey_btn.config(text="修改", bg="#304766")
-        self._hotkey_entry.config(fg=_TEXT)
+        self._hotkey_btn.set_style(text="修改", bg="#304766")
+        self._hotkey_entry.set_foreground(_TEXT)
         if combo:
             self._cfg["hotkey"] = combo
             self._hotkey_var.set(self._display_combo(combo))
@@ -542,6 +609,7 @@ class SettingsWindow:
     def _save(self) -> None:
         self._finish_capture(None)  # 若在捕获态保存/关窗，先干净退出捕获
         self._cfg["widget_scale"] = round(self._scale_var.get() / 100, 2)
+        self._cfg["widget_aspect"] = round(self._aspect_var.get() / 100, 2)
         self._cfg["widget_opacity"] = round(self._opacity_var.get() / 100, 2)
         self._cfg["proofread_enabled"] = bool(self._proof_var.get())
         self._cfg["sound_cue"] = bool(self._sound_var.get())
@@ -559,3 +627,8 @@ class SettingsWindow:
         on_disk.update(self._cfg)
         cfg_path.write_text(json.dumps(on_disk, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         self.root.destroy()
+
+    def sync_appearance(self, scale: float, aspect: float) -> None:
+        """悬浮窗拖拽尺寸后，同步仍打开的设置页面和预览。"""
+        self._scale_var.set(round(scale * 100))
+        self._aspect_var.set(round(aspect * 100))

@@ -2,7 +2,7 @@
 
 设计（docs/overview.md「可编辑检测为什么用 UIAutomation」「为什么不用剪贴板」）：
 - uiautomation 取焦点控件，ControlType ∈ {Edit, Document} 或 ValuePattern 可写 → 可输入
-- 查不到控件（自绘 UI）或 UIA 异常 → 默认放行；config 黑名单按进程名关停
+- 开始时锁定窗口/控件；已知终端允许原生焦点检测，其他 UIA 异常停止输入
 - 默认用 SendInput Unicode 注入直接上屏（不经剪贴板，不污染剪贴板历史）；
   个别不认 VK_PACKET 的应用可用 config.input_clipboard=true 回退剪贴板粘贴路径
 - 记账：_current 跟踪当前句已上屏 partial，整句刷新 = 退格 len(_current) 次 + 插入新句
@@ -16,11 +16,10 @@ import time
 
 import keyboard  # type: ignore[import-untyped]  # 仅剪贴板兜底路径使用
 import pyperclip  # type: ignore[import-untyped]  # 同上
-import uiautomation  # type: ignore[import-untyped]
 
 from voice2text import keysender
+from voice2text.target import InputTarget
 
-_EDITABLE_CONTROL_TYPES = {"EditControl", "DocumentControl"}
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 
 
@@ -41,6 +40,8 @@ class TextInserter:
         self.aborted = False  # 注入失败导致会话停写（主循环据此提示用户）
         self._session_open = False
         self._lock = threading.RLock()  # 识别线程（partial/commit）与校对（replace_committed_range）并发写
+        self._target: InputTarget | None = None
+        self.abort_reason = ""
 
     @property
     def committed_chars(self) -> int:
@@ -61,48 +62,54 @@ class TextInserter:
 
     # ---- 会话生命周期 ----
 
-    def begin_session(self) -> None:
+    def begin_session(self, target: InputTarget) -> None:
         """开启会话。不经剪贴板，无保存/恢复动作。"""
         with self._lock:
             self._current = ""
             self._committed_texts = []
             self._detached = False
             self.aborted = False
+            self.abort_reason = ""
+            self._target = target
             self._session_open = True
-            # 注意：_last_committed_tail 不重置——同一文本框里跨会话延续句间空格逻辑
+            self._last_committed_tail = ""  # 新会话的光标位置不一定与上次相同
 
     def end_session(self) -> None:
         """关闭会话（此后所有写入 no-op）。"""
         self._session_open = False
+        self._target = None
+
+    def abort(self, reason: str) -> None:
+        """立即关闭写入闸门；不等待持锁的注入批次。"""
+        self._session_open = False
+        self.aborted = True
+        self.abort_reason = reason
+
+    def capture_target(self) -> InputTarget:
+        return InputTarget.capture(self._blacklist)
+
+    def guard_focus(self) -> bool:
+        """主循环维持原前台，覆盖停止后的校对阶段。"""
+        if not self._session_open or self._target is None:
+            return False
+        try:
+            restored = self._target.restore()
+        except Exception:
+            restored = False
+        if not restored:
+            self.abort("原输入窗口已关闭或焦点无法安全恢复，已停止上屏")
+            return False
+        return True
+
+    def _check_batch(self) -> None:
+        if not self._session_open or self._target is None or not self._target.focused():
+            self.abort("输入期间焦点发生变化，已停止上屏，请回到原位置重新开始")
+            raise OSError(self.abort_reason)
 
     # ---- 可编辑检测 ----
 
     def is_editable_focused(self) -> bool:
-        try:
-            ctrl = uiautomation.GetFocusedControl()
-        except Exception:  # noqa: BLE001 —— UIA 不可用（会话/权限）时默认放行
-            return True
-        if ctrl is None:
-            return True
-        process = ""
-        try:
-            process = self._norm_process(ctrl.ProcessName or "")
-        except Exception:  # noqa: BLE001
-            pass
-        if process in self._blacklist:
-            return False
-        if ctrl.ControlTypeName in _EDITABLE_CONTROL_TYPES:
-            return True
-        try:
-            value = ctrl.GetValuePattern()
-        except Exception:  # noqa: BLE001
-            value = None
-        if value is not None:
-            try:
-                return not value.IsReadOnly
-            except Exception:  # noqa: BLE001
-                return True
-        return False
+        return self.guard_focus()
 
     # ---- 写入与记账 ----
 
@@ -169,6 +176,7 @@ class TextInserter:
                 return False
             old_span = self._committed_texts[start : end + 1]
             if new_text.strip() == "".join(old_span).strip():
+                self._committed_texts[start : end + 1] = ["".join(old_span)]
                 return True  # 无实质变化，不动屏幕
             if not self.is_editable_focused():
                 return False  # 不在编辑框：放弃本次替换（原文保留在屏上）
@@ -194,24 +202,31 @@ class TextInserter:
     # ---- 底层写入 ----
 
     def _delete_chars(self, n: int) -> None:
+        self._check_batch()
         if self._use_clipboard:
             for _ in range(n):
+                self._check_batch()
                 keyboard.press_and_release("backspace")
             time.sleep(0.01)
         else:
-            keysender.send_backspaces(n)
+            keysender.send_backspaces(n, guard=self._check_batch)
 
     def _insert_text(self, text: str) -> None:
+        self._check_batch()
         if self._use_clipboard:
             # 剪贴板兜底路径：键间必须留间隔——IME 的异步键盘钩子可能把零间隔
             # 连发的 Ctrl 和 v 拆散，落单的 v 进入拼音组合框（实测 bug）。
             pyperclip.copy(text)
             keyboard.release("ctrl")
             time.sleep(0.01)
+            self._check_batch()
             keyboard.press("ctrl")
-            time.sleep(0.02)
-            keyboard.press_and_release("v")
-            time.sleep(0.02)
-            keyboard.release("ctrl")
+            try:
+                time.sleep(0.02)
+                self._check_batch()
+                keyboard.press_and_release("v")
+                time.sleep(0.02)
+            finally:
+                keyboard.release("ctrl")
         else:
-            keysender.send_text(text)
+            keysender.send_text(text, guard=self._check_batch)

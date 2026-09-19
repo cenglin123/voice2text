@@ -8,12 +8,15 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-18 23:11
+> 最近重建：2026-09-19 09:16
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [听写失焦后文字或校对可能写到其他位置](../../docs/problems/bugfix/session-target-lock.md) — fixed · high · active · 更新于 2026-09-19
+- [OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — fixed · high · active · 更新于 2026-09-19
+- [毛玻璃悬浮窗圆角锯齿与角落蓝底](../../docs/problems/bugfix/widget-glass-corners.md) — fixed · medium · active · 更新于 2026-09-19
 - [悬浮窗拖动时 ULW 旧坐标撤销 Tk 移动](../../docs/problems/bugfix/widget-drag-position.md) — fixed · medium · active · 更新于 2026-09-18
 - [设置快捷键时按下修饰键立即退出捕获](../../docs/problems/bugfix/settings-modifier-capture.md) — fixed · medium · active · 更新于 2026-09-18
 - [设置页缩放滑条无法达到配置支持的范围](../../docs/problems/bugfix/settings-slider-range.md) — fixed · low · active · 更新于 2026-09-18

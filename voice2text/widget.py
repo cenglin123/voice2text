@@ -14,12 +14,13 @@ import math
 import queue
 import tkinter
 
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageFilter, ImageChops
 
 from voice2text import layered
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 104
+MIN_ASPECT, MAX_ASPECT = 2.6, 5.0
 CORNER_RADIUS = 22
 SS = 3  # 超采样倍数
 
@@ -71,18 +72,22 @@ class DictationWidget:
     def __init__(
         self,
         scale: float = 1.0,
+        aspect: float = BASE_W / BASE_H,
         opacity: float = 0.92,
         on_toggle=None,
         on_settings=None,
         on_hide=None,
         on_quit=None,
+        on_resize=None,
     ) -> None:
         self._scale = scale
+        self._aspect = max(MIN_ASPECT, min(MAX_ASPECT, aspect))
         self._opacity = opacity
         self._on_toggle = on_toggle
         self._on_settings = on_settings
         self._on_hide = on_hide
         self._on_quit = on_quit
+        self._on_resize = on_resize
         self._state = "idle"
         self._phase = 0.0
         try:  # 高 DPI 模糊缓解——必须早于首个窗口创建（进程级设置）
@@ -97,12 +102,14 @@ class DictationWidget:
         self.root.title("voice2text")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
+        self._h = round(BASE_H * scale)
+        self._w = round(self._h * self._aspect)
         self.root.geometry(f"{self._w}x{self._h}+60+60")
         self._opacity_pct = int(round(opacity * 255))
         # 分层窗口（逐像素 alpha，边缘真平滑）；失败回退 transparentcolor + 整窗 alpha
         self._layered = False
         self._glass = False
+        self._backdrop = None
         self._fallback_applied = False
 
         self.canvas = tkinter.Canvas(self.root, width=self._w, height=self._h, bg="#10161F", highlightthickness=0)
@@ -113,6 +120,7 @@ class DictationWidget:
         self._bind()
         self.root.deiconify()
         self._init_layered()
+        self.root.bind("<Configure>", self._on_configure)
         self._animate()
 
     @property
@@ -137,6 +145,17 @@ class DictationWidget:
             t = y / H
             alpha = round(150 + 40 * t) if self._glass else 255
             d.line([0, y, W, y], fill=(*_lerp(BG_TOP, BG_BOTTOM, t), alpha))
+        if self._glass:
+            # 模糊底层内缩 4px，外边缘由不透明细边带遮住其硬裁剪。
+            # 内外 alpha 平滑过渡，真正的外轮廓始终只由 ULW 抗锯齿承担。
+            rim = Image.new("L", (W, H), 255)
+            inset = round(4 * self._scale * SS)
+            ImageDraw.Draw(rim).rounded_rectangle(
+                [inset, inset, W - 1 - inset, H - 1 - inset],
+                radius=max(1, R - inset), fill=0,
+            )
+            rim = rim.filter(ImageFilter.GaussianBlur(max(1, self._scale * SS)))
+            img.putalpha(ImageChops.lighter(img.getchannel("A"), rim))
         mask = Image.new("L", (W, H), 0)
         ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=R, fill=255)
         pill = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -165,9 +184,9 @@ class DictationWidget:
                font=f_title, fill=(185, 198, 218, 255))
 
         # 右上：齿轮 | 分隔线 | 关闭（加大图标、留足右缘呼吸空间）
-        gear_cx = round(273 * unit)
-        div_x = round(293 * unit)
-        close_cx = round(313 * unit)
+        gear_cx = W - round(67 * unit)
+        div_x = W - round(47 * unit)
+        close_cx = W - round(27 * unit)
         self._draw_gear(d, gear_cx, row_cy, round(7 * unit), (170, 184, 204, 255))
         d.line([div_x, row_cy - 8 * unit, div_x, row_cy + 8 * unit],
                fill=(67, 83, 107, 200), width=max(1, round(unit)))
@@ -210,6 +229,13 @@ class DictationWidget:
         text = STATUS_TEXT.get(self._state, "")
         d.text((W / 2, round(86 * unit)), text, anchor="mm", font=f_status, fill=(232, 237, 244, 255))
 
+        # 右下角尺寸手柄：足够克制，但让“可调整大小”可以被发现。
+        grip = round(8 * unit)
+        gx, gy = W - round(9 * unit), H - round(9 * unit)
+        for offset in (0, round(4 * unit)):
+            d.line([gx - grip + offset, gy, gx, gy - grip + offset],
+                   fill=(119, 139, 168, 185), width=max(1, round(unit)))
+
         # 缩小抗锯齿 → 贴图
         small = pill.resize((w, h), Image.LANCZOS)
         self._last_pil = small  # 测试/导出挂钩
@@ -239,20 +265,71 @@ class DictationWidget:
         try:
             hwnd = layered.window_handle(self.root.winfo_id())
             layered.enable(hwnd)
+            layered.no_activate(hwnd)
             self._hwnd = hwnd
             self._layered = True
-            self._glass = layered.enable_blur(hwnd, self._w, self._h,
-                                              round(CORNER_RADIUS * self._scale))
+            self._backdrop = tkinter.Toplevel(self.root)
+            self._backdrop.withdraw()
+            self._backdrop.overrideredirect(True)
+            self._backdrop.attributes("-topmost", True)
+            self._backdrop.geometry(f"{self._w}x{self._h}")
+            self._backdrop.update_idletasks()
+            self._backdrop_hwnd = layered.window_handle(self._backdrop.winfo_id())
+            layered.enable(self._backdrop_hwnd)
+            layered.no_activate(self._backdrop_hwnd)
+            pad = max(2, round(2 * self._scale))
+            self._glass = layered.enable_blur(self._backdrop_hwnd, self._w - 2 * pad, self._h - 2 * pad,
+                                              max(1, round(CORNER_RADIUS * self._scale) - pad))
+            if self._glass:
+                self._backdrop.deiconify()
+                self._sync_backdrop()
+            else:
+                self._backdrop.destroy()
+                self._backdrop = None
             # ULW 自行保留表面。Expose 时重贴旧尺寸会覆盖尚在处理的 Tk geometry。
             self._render()
         except Exception:  # noqa: BLE001
             self._use_fallback()
+
+    def _on_configure(self, ev) -> None:
+        if ev.widget is self.root and self._glass:
+            self._sync_backdrop()
+
+    def _sync_backdrop(self) -> None:
+        if not self._glass or self._backdrop is None:
+            return
+        pad = max(2, round(2 * self._scale))
+        w, h = self._w - pad * 2, self._h - pad * 2
+        x, y = self.root.winfo_x() + pad, self.root.winfo_y() + pad
+        shape = (w, h, pad)
+        if getattr(self, "_backdrop_shape", None) != shape:
+            if not layered.resize_blur(self._backdrop_hwnd, w, h,
+                                       max(1, round(CORNER_RADIUS * self._scale) - pad)):
+                self._disable_backdrop()
+                return
+            self._backdrop_shape = shape
+        surface = Image.new("RGBA", (w, h), (0, 0, 0, 1))
+        if not layered.update(self._backdrop_hwnd, surface, x, y):
+            self._disable_backdrop()
+            return
+        layered.place_behind(self._backdrop_hwnd, self._hwnd, x, y, w, h)
+
+    def _disable_backdrop(self) -> None:
+        self._glass = False
+        if self._backdrop is not None:
+            self._backdrop.destroy()
+            self._backdrop = None
+        self._render()
 
     def _use_fallback(self) -> None:
         """回退 transparentcolor + 整窗 alpha（有边缘损失，保功能）。"""
         if self._fallback_applied:
             return
         self._fallback_applied = True
+        self._glass = False
+        if self._backdrop is not None:
+            self._backdrop.destroy()
+            self._backdrop = None
         if hasattr(self, "_hwnd"):
             layered.disable(self._hwnd)
         self._layered = False
@@ -313,6 +390,8 @@ class DictationWidget:
     def _on_press(self, ev) -> None:
         self._drag_off = (ev.x, ev.y)
         self._drag_moved = False
+        self._resizing = ev.x >= self._w - max(18, round(20 * self._scale)) and ev.y >= self._h - max(18, round(20 * self._scale))
+        self._resize_origin = (getattr(ev, "x_root", ev.x), getattr(ev, "y_root", ev.y), self._w, self._h)
 
     def _hit(self, x: int, y: int) -> str | None:
         for kind, (cx, cy, r) in self._hits.items():
@@ -322,6 +401,15 @@ class DictationWidget:
 
     def _on_motion(self, ev) -> None:
         if self._drag_off is None:
+            return
+        if self._resizing:
+            x0, y0, w0, h0 = self._resize_origin
+            wanted_h = max(round(BASE_H * 0.5), min(round(BASE_H * 1.5), h0 + ev.y_root - y0))
+            wanted_w = max(round(wanted_h * MIN_ASPECT), min(round(wanted_h * MAX_ASPECT), w0 + ev.x_root - x0))
+            self._scale = wanted_h / BASE_H
+            self._aspect = wanted_w / wanted_h
+            self._resize_surface(wanted_w, wanted_h)
+            self._drag_moved = True
             return
         dx, dy = ev.x - self._drag_off[0], ev.y - self._drag_off[1]
         if not self._drag_moved and abs(dx) + abs(dy) > 4:
@@ -333,6 +421,8 @@ class DictationWidget:
                 self._sync_surface(self._last_pil)
 
     def _on_release(self, ev) -> None:
+        if self._resizing and self._drag_moved and self._on_resize:
+            self._on_resize(self._scale, self._aspect)
         if not self._drag_moved and self._drag_off is not None:
             kind = self._hit(ev.x, ev.y)
             if kind == "gear" and self._on_settings:
@@ -342,6 +432,7 @@ class DictationWidget:
             elif self._on_toggle:  # 麦克风/其他区域 = 切换听写
                 self._on_toggle()
         self._drag_off = None
+        self._resizing = False
 
     # ---- 状态与队列（工作线程 → 主线程）----
 
@@ -364,27 +455,36 @@ class DictationWidget:
     def show(self) -> None:
         self.root.deiconify()
         self.root.attributes("-topmost", True)
+        if self._glass and self._backdrop is not None:
+            self._backdrop.deiconify()
+            self.root.update_idletasks()
+            self._sync_backdrop()
 
     def hide(self) -> None:
+        if self._backdrop is not None:
+            self._backdrop.withdraw()
         self.root.withdraw()
 
-    def apply_appearance(self, scale: float, opacity: float) -> None:
-        """主线程调用：调整大小与透明度并重绘。"""
-        self._scale = scale
-        self._opacity = opacity
-        self._opacity_pct = int(round(opacity * 255))
-        if not self._layered:
-            self.root.attributes("-alpha", opacity)
-        self._w, self._h = int(BASE_W * scale), int(BASE_H * scale)
+    def _resize_surface(self, width: int, height: int) -> None:
+        self._w, self._h = width, height
         self.canvas.config(width=self._w, height=self._h)
         self.root.geometry(f"{self._w}x{self._h}")
         self.root.update_idletasks()
         if self._glass:
-            if not layered.resize_blur(self._hwnd, self._w, self._h,
-                                       round(CORNER_RADIUS * self._scale)):
-                layered.disable_blur(self._hwnd)
-                self._glass = False
+            self._sync_backdrop()
         self._render()
+
+    def apply_appearance(self, scale: float, opacity: float, aspect: float | None = None) -> None:
+        """主线程调用：调整大小与透明度并重绘。"""
+        self._scale = scale
+        if aspect is not None:
+            self._aspect = max(MIN_ASPECT, min(MAX_ASPECT, aspect))
+        self._opacity = opacity
+        self._opacity_pct = int(round(opacity * 255))
+        if not self._layered:
+            self.root.attributes("-alpha", opacity)
+        height = round(BASE_H * scale)
+        self._resize_surface(round(height * self._aspect), height)
 
     def run_tick(self, tick, interval_ms: int = 150) -> None:
         """驱动主循环：tick() 由调用方提供（热键/托盘命令/看门狗）。"""

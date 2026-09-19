@@ -19,5 +19,16 @@ if not defined PY (
     exit /b 1
 )
 
+if /i "%~1"=="--debug" goto debug
+set "PYW=%PY:python.exe=pythonw.exe%"
+if not exist "%PYW%" (
+    echo pythonw.exe is missing. Run install.bat to repair the installation.
+    pause
+    exit /b 1
+)
+start "" "%PYW%" -I "%~dp0run_gui.pyw"
+exit /b 0
+
+:debug
 "%PY%" -m voice2text.main
 if errorlevel 1 pause

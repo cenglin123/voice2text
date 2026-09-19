@@ -94,12 +94,14 @@ def _build_backspace_inputs(n: int) -> list[INPUT]:
     return events
 
 
-def _flush(events: list[INPUT]) -> None:
+def _flush(events: list[INPUT], guard=None) -> None:
     """分批 SendInput：批内一次系统调用（原子、保序），批间留间隔。"""
     user32 = ctypes.windll.user32
     for i in range(0, len(events), _GROUP_EVENTS):
         group = events[i : i + _GROUP_EVENTS]
         arr = (INPUT * len(group))(*group)
+        if guard is not None:
+            guard()
         sent = user32.SendInput(len(group), arr, ctypes.sizeof(INPUT))
         if sent != len(group):
             raise OSError(f"SendInput 只注入了 {sent}/{len(group)} 个事件")
@@ -107,15 +109,15 @@ def _flush(events: list[INPUT]) -> None:
             time.sleep(_GROUP_DELAY_S)
 
 
-def send_text(text: str) -> None:
+def send_text(text: str, guard=None) -> None:
     """在当前光标处插入文本（不经剪贴板，绕过输入法直接上屏）。"""
     if not text:
         return
-    _flush(_build_char_inputs(text))
+    _flush(_build_char_inputs(text), guard)
 
 
-def send_backspaces(n: int) -> None:
+def send_backspaces(n: int, guard=None) -> None:
     """发送 n 个退格。"""
     if n <= 0:
         return
-    _flush(_build_backspace_inputs(n))
+    _flush(_build_backspace_inputs(n), guard)

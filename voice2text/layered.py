@@ -115,6 +115,9 @@ _gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
 _gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
 _user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
 _user32.SetWindowRgn.restype = ctypes.c_int
+_user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.UINT]
+_user32.SetWindowPos.restype = wintypes.BOOL
 _user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
 _user32.SystemParametersInfoW.restype = wintypes.BOOL
 
@@ -190,6 +193,16 @@ def enable(hwnd: int) -> None:
 def window_handle(tk_id: int) -> int:
     """取得 Tk 外层原生窗口，明确使用指针宽度的 HWND 签名。"""
     return _user32.GetParent(tk_id) or tk_id
+
+
+def no_activate(hwnd: int) -> None:
+    """悬浮控件不抢走输入窗口焦点，不在任务栏生成独立按钮。"""
+    ex = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | 0x08000000 | 0x80)
+
+
+def place_behind(hwnd: int, foreground_hwnd: int, x: int, y: int, w: int, h: int) -> None:
+    _user32.SetWindowPos(hwnd, foreground_hwnd, x, y, w, h, 0x0010)  # SWP_NOACTIVATE
 
 
 def update(hwnd: int, img_rgba, x: int, y: int) -> bool:

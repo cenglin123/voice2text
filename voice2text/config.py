@@ -23,6 +23,7 @@ DEFAULTS: dict = {
     "input_clipboard": False,
     # GUI（悬浮窗/托盘）
     "widget_scale": 1.0,  # 悬浮窗缩放 0.5~1.5
+    "widget_aspect": 3.27,  # 悬浮窗长宽比 2.6~5.0
     "widget_opacity": 0.92,  # 悬浮窗不透明度 0.3~1.0
     "sound_cue": True,  # 开始/停止听写提示音
     "autostart": False,  # 开机自启动（实际状态以注册表为准，此处仅持久化 UI 选择）
@@ -42,6 +43,7 @@ class AppConfig:
     debug_dump_wav: bool
     input_clipboard: bool
     widget_scale: float
+    widget_aspect: float
     widget_opacity: float
     sound_cue: bool
     autostart: bool
@@ -82,6 +84,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         debug_dump_wav=bool(merged["debug_dump_wav"]),
         input_clipboard=bool(merged["input_clipboard"]),
         widget_scale=float(merged["widget_scale"]),
+        widget_aspect=float(merged["widget_aspect"]),
         widget_opacity=float(merged["widget_opacity"]),
         sound_cue=bool(merged["sound_cue"]),
         autostart=bool(merged["autostart"]),
