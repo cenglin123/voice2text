@@ -179,7 +179,8 @@ class Slider(tkinter.Canvas):
         self._var = variable
         self._minimum, self._maximum = minimum, maximum
         self._track_w = w
-        self._pad = 8
+        # 圆点半径为 9px，另留出 1px Canvas 高亮边框；避免最小/最大值时被裁切。
+        self._pad = 11
         self.bind("<Button-1>", self._on_drag)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<Configure>", self._resize)
@@ -207,8 +208,8 @@ class Slider(tkinter.Canvas):
         px = x0 + int((x1 - x0) * self._pct())
         if px > x0:
             self.create_line(x0, y, px, y, fill=_ACCENT, width=5, capstyle="round")
-        self.create_oval(px - 9, y - 9, px + 9, y + 9, fill=_ACCENT, outline="")
-        self.create_oval(px - 5, y - 5, px + 5, y + 5, fill="#E8F2FF", outline="")
+        self.create_oval(px - 9, y - 9, px + 9, y + 9, fill=_ACCENT, outline="", tags="knob")
+        self.create_oval(px - 5, y - 5, px + 5, y + 5, fill="#E8F2FF", outline="", tags="knob_inner")
 
     def _on_drag(self, ev) -> None:
         x0, x1 = self._pad, self._track_w - self._pad
@@ -473,14 +474,14 @@ class SettingsWindow:
                                       ("界面字体", self._font_var, 85, 135, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
             row.pack(fill="x", pady=2)
-            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=10, anchor="w",
+            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
                           font=(_FONT, -13)).pack(side="left")
             pct = tkinter.StringVar(value=(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}"))
             self._percent_vars.append(pct)
             tkinter.Label(row, textvariable=pct, bg=_CARD, fg=_SUB, width=5, anchor="e",
                           font=(_FONT, -13)).pack(side="right")
             slider = Slider(row, var, minimum=low, maximum=high)
-            slider.pack(side="left", fill="x", expand=True, padx=(14, 14))
+            slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
             self._sliders.append(slider)
             var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
         self._font_var.trace_add("write", lambda *_: self._set_font_scale(self._font_var.get() / 100))

@@ -45,6 +45,9 @@ def main():
             assert all(mask.itemcget(1, "outline") == "#344865"
                        for mask in window._corner_masks)
             assert window._hotkey_entry.coords(window._hotkey_entry._window)[0] == 13
+            # 长宽比处于最小值时，左端圆点也必须完整落在 Canvas 边框内。
+            left_knob = window._sliders[1].bbox("knob")
+            assert left_knob is not None and left_knob[0] >= 1, left_knob
             window.sync_appearance(1.25, 1.0)
             window.root.update()
             assert window._scale_var.get() == 125
