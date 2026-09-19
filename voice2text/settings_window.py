@@ -473,14 +473,14 @@ class SettingsWindow:
                                       ("界面字体", self._font_var, 85, 135, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
             row.pack(fill="x", pady=2)
-            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
+            tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=10, anchor="w",
                           font=(_FONT, -13)).pack(side="left")
             pct = tkinter.StringVar(value=(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}"))
             self._percent_vars.append(pct)
             tkinter.Label(row, textvariable=pct, bg=_CARD, fg=_SUB, width=5, anchor="e",
                           font=(_FONT, -13)).pack(side="right")
             slider = Slider(row, var, minimum=low, maximum=high)
-            slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
+            slider.pack(side="left", fill="x", expand=True, padx=(14, 14))
             self._sliders.append(slider)
             var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
         self._font_var.trace_add("write", lambda *_: self._set_font_scale(self._font_var.get() / 100))
