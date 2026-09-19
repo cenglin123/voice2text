@@ -377,6 +377,7 @@ def _gui_main(output) -> int:
     # 延迟导入：tkinter 仅在模型就绪后需要
     from voice2text.settings_window import SettingsWindow
     from voice2text.tray import build_tray, update_icon
+    from voice2text.tray_menu import TrayMenu
     from voice2text.widget import DictationWidget
     from voice2text.desktop import DebugWindow
 
@@ -387,7 +388,8 @@ def _gui_main(output) -> int:
         print(f"[错误] 全局热键初始化失败：{exc}")
         return 1
 
-    ui = types.SimpleNamespace(widget=None, settings=None, tray=None, debug=None, visible=True)
+    ui = types.SimpleNamespace(widget=None, settings=None, tray=None, tray_menu=None,
+                               debug=None, visible=True)
 
     def widget_resized(scale: float, aspect: float) -> None:
         """悬浮窗拖拽结束后同步内存、设置窗和配置文件。"""
@@ -430,12 +432,14 @@ def _gui_main(output) -> int:
     def drain_cmds() -> None:
         while True:
             try:
-                cmd, _ = app.cmd_queue.get_nowait()
+                cmd, payload = app.cmd_queue.get_nowait()
             except queue.Empty:
                 return
             if cmd == "toggle":
                 print("[托盘] 收到切换命令")
                 app.request_toggle()
+            elif cmd == "tray_menu":
+                ui.tray_menu.show(*payload)
             elif cmd == "toggle_widget":
                 (hide_widget if ui.visible else show_widget)()
             elif cmd == "settings":
@@ -524,7 +528,10 @@ def _gui_main(output) -> int:
         ui.widget.root.after(150, loop)
 
     ui.tray = build_tray(app.cmd_queue, app, hotkey=cfg.hotkey)
-    threading.Thread(target=ui.tray.run, daemon=True).start()
+    ui.tray_menu = TrayMenu(ui.widget.root, app,
+                            lambda command: app.cmd_queue.put((command, None)))
+    # pystray 要求从主线程进入 detached 模式，再与 Tk mainloop 并行。
+    ui.tray.run_detached()
     app.preload_models()  # 后台加载模型（悬浮窗"加载中"，完成后"待命中"）
     def keep_target() -> None:
         if not app._closing:

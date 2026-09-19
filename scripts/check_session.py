@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from voice2text import target, keysender
 from voice2text.input import TextInserter
 from voice2text.desktop import RuntimeOutput, SingleInstance
-from voice2text.tray import build_tray
+from voice2text.tray import build_tray, toggle_label
+from pystray._util import win32
 from voice2text.activity import InputActivityGuard
 from voice2text.main import DictationApp
 from voice2text.config import AppConfig, DEFAULTS
@@ -139,9 +140,23 @@ class DesktopTests(unittest.TestCase):
         app = Mock(active=False, widget_visible=True)
         app.hotkey.combo = "ctrl+alt+v"
         icon = build_tray(__import__("queue").Queue(), app)
-        self.assertEqual(icon.menu.items[0].text, "开始听写（ctrl+alt+v）")
+        self.assertEqual(toggle_label(app), "开始听写（ctrl+alt+v）")
+        self.assertIsNone(icon.menu)
         app.active = True
-        self.assertEqual(icon.menu.items[0].text, "停止听写（ctrl+alt+v）")
+        self.assertEqual(toggle_label(app), "停止听写（ctrl+alt+v）")
+
+    def test_tray_clicks_are_forwarded_to_custom_menu(self):
+        import queue
+        commands = queue.Queue()
+        app = Mock(active=False, widget_visible=True)
+        app.hotkey.combo = "alt+v"
+        icon = build_tray(commands, app)
+        icon._on_notify(0, win32.WM_LBUTTONUP)
+        self.assertEqual(commands.get_nowait(), ("toggle", None))
+        icon._on_notify(0, win32.WM_RBUTTONUP)
+        command, point = commands.get_nowait()
+        self.assertEqual(command, "tray_menu")
+        self.assertEqual(len(point), 2)
 
     def test_stop_hotkey_is_not_treated_as_manual_edit(self):
         guard = InputActivityGuard.__new__(InputActivityGuard)

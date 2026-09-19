@@ -33,7 +33,7 @@ run.bat --debug
 
 悬浮窗右下角可拖动调整长宽；设置页的“窗口大小”和“长宽比”会与拖动结果同步。
 
-桌面组件验证：`python scripts/check_widget.py`、`python scripts/check_settings.py`、`python scripts/check_session.py`（Windows，不加载模型）；`python scripts/check_target_desktop.py` 只向脚本自建编辑窗注入测试文字。悬浮窗验证加 `--capture-dir <临时目录>` 可保存测试背景截图。
+桌面组件验证：`python scripts/check_widget.py`、`python scripts/check_settings.py`、`python scripts/check_tray_menu.py`、`python scripts/check_session.py`（Windows，不加载模型）；`python scripts/check_target_desktop.py` 只向脚本自建编辑窗注入测试文字。悬浮窗和托盘菜单验证分别支持截图参数，详见脚本帮助。
 
 听写手动验证：启动后打开记事本，按 Alt+V 说话 → 观察流式上屏 → 再按 Alt+V 停止 → 确认二次校对替换。
 
