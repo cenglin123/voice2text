@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import tkinter
+import tkinter.messagebox as messagebox
 import tkinter.font as tkfont
 import winreg
 from pathlib import Path
@@ -491,8 +492,11 @@ class SettingsWindow:
         self._preview.bind("<Configure>", lambda e: self._draw_preview())
 
         c3 = card("features", "功能设置", "")
-        self._proof_var = tkinter.BooleanVar(value=bool(self._cfg.get("proofread_enabled", True)))
         self._llm_path = load_config().llm_model_path
+        proofread_ready = self._llm_path.is_file()
+        self._proof_var = tkinter.BooleanVar(
+            value=bool(self._cfg.get("proofread_enabled", True)) and proofread_ready
+        )
         model_row = tkinter.Frame(c3, bg=_CARD)
         model_row.pack(fill="x", pady=(4, 12))
         self._model_status = tkinter.StringVar()
@@ -515,7 +519,13 @@ class SettingsWindow:
             value_label = tkinter.Label(row, text="开" if var.get() else "关", bg=_CARD,
                                         fg=_SUB, width=2, font=(_FONT, -12))
             value_label.pack(side="right", padx=(8, 0))
-            toggle = Toggle(row, var, command=lambda v=var, text=value_label: text.config(text="开" if v.get() else "关"))
+            if label == "开启二次校对":
+                command = lambda text=value_label: self._proofread_toggle_changed(text)
+            else:
+                command = lambda v=var, text=value_label: text.config(text="开" if v.get() else "关")
+            toggle = Toggle(row, var, command=command)
+            if label == "开启二次校对":
+                self._proof_toggle = toggle
             toggle.pack(side="right", padx=(16, 0))
             self._toggles.append(toggle)
             box = tkinter.Frame(row, bg=_CARD)
@@ -534,6 +544,20 @@ class SettingsWindow:
     def _download_model(self) -> None:
         if not self._llm_path.is_file():
             model_download.start(self._llm_path)
+
+    def _proofread_toggle_changed(self, value_label) -> None:
+        """没有本地 GGUF 时拒绝开启，并把原因直接反馈到设置页。"""
+        if self._proof_var.get() and not self._llm_path.is_file():
+            self._proof_var.set(False)
+            self._proof_toggle._draw()
+            value_label.config(text="关")
+            messagebox.showwarning(
+                "需要校对模型",
+                "请先下载校对模型，下载完成后才能开启二次校对。",
+                parent=self.root,
+            )
+            return
+        value_label.config(text="开" if self._proof_var.get() else "关")
 
     def _poll_model_download(self) -> None:
         if not self.root.winfo_exists():

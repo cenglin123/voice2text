@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-19 20:47
+> 最近重建：2026-09-19 21:00
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [未安装校对模型时禁止开启二次校对](../../docs/problems/bugfix/proofread-toggle-requires-model.md) — fixed · low · active · 更新于 2026-09-19
 - [Python 证书链失败导致模型下载无法完成](../../docs/problems/bugfix/model-download-certificate-chain.md) — mitigated · medium · active · 更新于 2026-09-19
 - [安装器可能选中不兼容的系统 Python](../../docs/problems/bugfix/installer-python-compatibility.md) — fixed · medium · active · 更新于 2026-09-19
 - [设置页滑块在最小值时左端圆点被裁切](../../docs/problems/bugfix/settings-slider-endpoint-clipping.md) — fixed · low · active · 更新于 2026-09-19
