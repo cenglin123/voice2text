@@ -39,6 +39,11 @@ def main():
             assert isinstance(window._hotkey_btn, RoundedButton)
             assert len(window._corner_masks) == 4
             assert window.root.attributes("-transparentcolor") == "#010203"
+            assert [mask.itemcget(1, "fill") for mask in window._corner_masks] == [
+                "#1B2D4B", "#16243D", "#1B2D4B", "#16243D",
+            ]
+            assert all(mask.itemcget(1, "outline") == "#344865"
+                       for mask in window._corner_masks)
             assert window._hotkey_entry.coords(window._hotkey_entry._window)[0] == 13
             window.sync_appearance(1.25, 1.0)
             window.root.update()

@@ -516,18 +516,18 @@ class SettingsWindow:
             return
         r = _WINDOW_RADIUS
         specs = (
-            (0.0, 0.0, "nw", (0, 0, r * 2, r * 2)),
-            (1.0, 0.0, "ne", (-r, 0, r, r * 2)),
-            (0.0, 1.0, "sw", (0, -r, r * 2, r)),
-            (1.0, 1.0, "se", (-r, -r, r, r)),
+            (0.0, 0.0, "nw", (0, 0, r * 2, r * 2), _SIDE),
+            (1.0, 0.0, "ne", (-r, 0, r, r * 2), _BG),
+            (0.0, 1.0, "sw", (0, -r, r * 2, r), _SIDE),
+            (1.0, 1.0, "se", (-r, -r, r, r), _BG),
         )
         self._corner_masks = []
-        for relx, rely, anchor, oval in specs:
+        for relx, rely, anchor, oval, fill in specs:
             corner = tkinter.Canvas(
                 self.root, width=r, height=r, bg=_WINDOW_KEY,
                 highlightthickness=0, borderwidth=0,
             )
-            corner.create_oval(*oval, fill=_CARD_EDGE, outline=_CARD_EDGE)
+            corner.create_oval(*oval, fill=fill, outline=_CARD_EDGE, width=1)
             corner.place(relx=relx, rely=rely, anchor=anchor)
             self._corner_masks.append(corner)
 
