@@ -267,8 +267,21 @@ class DictationApp:
             "replacement_failed": 0,
             "cancelled": 0,
         }
+        def cancellation_reason() -> str:
+            if self._closing:
+                return "程序退出"
+            if token != self._input_session:
+                return "会话已更换"
+            if token in self._cancelled_sessions:
+                return "超过校对等待上限"
+            if self._inserter.aborted:
+                return self._inserter.abort_reason or "输入保护关闭写入"
+            return ""
+
         for index, (start, end, text) in enumerate(chunks, 1):
-            if self._closing or self._inserter.aborted or token in self._cancelled_sessions:
+            reason = cancellation_reason()
+            if reason:
+                print(f"[校对取消] 会话 {token} 第 {index} 块，推理前：{reason}")
                 outcomes["cancelled"] += len(chunks) - index + 1
                 break
             t0 = time.monotonic()
@@ -288,13 +301,14 @@ class DictationApp:
                     outcome = getattr(self._proofreader, "last_outcome", "model_returned")
             finally:
                 timer.cancel()
-            if self._closing or self._inserter.aborted or token in self._cancelled_sessions:
+            reason = cancellation_reason()
+            duration = perf_counter_ns() - proofread_started
+            if token == self._input_session:
+                self._metrics.record("proofread_generate", duration, "cancelled" if reason else outcome)
+            if reason:
+                print(f"[校对取消] 会话 {token} 第 {index} 块，推理后 {duration / 1e9:.2f}s：{reason}；模型结果={outcome}")
                 outcomes["cancelled"] += len(chunks) - index + 1
                 break
-            if token != self._input_session:
-                outcomes["cancelled"] += len(chunks) - index + 1
-                break
-            self._metrics.record("proofread_generate", perf_counter_ns() - proofread_started, outcome)
             elapsed = time.monotonic() - t0
             if corrected is None:
                 failed += 1

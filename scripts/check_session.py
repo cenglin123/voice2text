@@ -213,6 +213,24 @@ class ProofreadTests(unittest.TestCase):
 
 
 class PerformanceTests(unittest.TestCase):
+    def test_cancelled_inference_keeps_timing_and_reason(self):
+        import io
+        from contextlib import redirect_stdout
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._input_session = 1
+        app._locked_sentences = ['测试']
+        app._proofreader = Mock()
+        def inference(text):
+            app._inserter.abort('测试手动编辑')
+            return '测试。'
+        app._proofreader.proofread.side_effect = inference
+        output = io.StringIO()
+        with redirect_stdout(output):
+            app._finalize_proofread(1)
+        self.assertIn('推理后', output.getvalue())
+        self.assertIn('测试手动编辑', output.getvalue())
+        self.assertEqual(app._metrics.summary()['proofread_generate']['results'], {'cancelled': 1})
+
     def test_summary_groups_result_codes_and_hides_small_sample_p95(self):
         recorder = PerformanceRecorder(capacity=3)
         recorder.record("partial_write", 2_000_000, "ok")
@@ -231,6 +249,26 @@ class PerformanceTests(unittest.TestCase):
         self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
+    def test_hotkey_event_sequence_survives_stale_async_state(self):
+        import ctypes
+        from voice2text.activity import _Key
+        guard = InputActivityGuard.__new__(InputActivityGuard)
+        guard._hotkey_groups = [{0xA4, 0xA5}, {0x56}]
+        guard._down = set()
+        guard.inserter = Mock(_session_open=True)
+        def emit(vk, message):
+            key = _Key(vk=vk)
+            guard._key(0, message, ctypes.addressof(key))
+        with patch('voice2text.activity._pressed', return_value=False), \
+             patch('voice2text.activity._user.CallNextHookEx', return_value=0):
+            emit(0xA4, 0x104)
+            emit(0x56, 0x104)
+            guard.inserter.abort.assert_not_called()
+            emit(0x56, 0x105)
+            emit(0xA4, 0x105)
+            emit(0x56, 0x100)
+            guard.inserter.abort.assert_called_once()
+
     def test_output_bounded(self):
         output = RuntimeOutput()
         output.write("a" * 100000)
@@ -271,6 +309,7 @@ class DesktopTests(unittest.TestCase):
     def test_stop_hotkey_is_not_treated_as_manual_edit(self):
         guard = InputActivityGuard.__new__(InputActivityGuard)
         guard._hotkey_groups = [{0xA4, 0xA5}, {0x56}]
+        guard._down = {0xA4}
         with patch("voice2text.activity._pressed", side_effect=lambda vk: vk == 0xA4):
             self.assertTrue(guard._is_hotkey(0x56))
             self.assertFalse(guard._is_hotkey(0x41))

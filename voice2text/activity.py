@@ -45,6 +45,7 @@ class InputActivityGuard:
         self.inserter = inserter
         steps = keyboard.parse_hotkey(combo)
         self._hotkey_groups = [{_user.MapVirtualKeyW(scan, 3) for scan in group} for group in steps[0]]
+        self._down = {vk for group in self._hotkey_groups for vk in group if _pressed(vk)}
         self._callbacks = [_Hook(self._key), _Hook(self._mouse)]
         self._handles = []
         try:
@@ -58,6 +59,13 @@ class InputActivityGuard:
             raise
 
     def _key(self, code, message, pointer):
+        if code >= 0 and message in (0x100, 0x104, 0x101, 0x105):
+            event = ctypes.cast(pointer, ctypes.POINTER(_Key)).contents
+            if not event.flags & 0x10:
+                if message in (0x101, 0x105):
+                    self._down.discard(event.vk)
+                else:
+                    self._down.add(event.vk)
         if code >= 0 and message in (0x100, 0x104) and self.inserter._session_open:
             key = ctypes.cast(pointer, ctypes.POINTER(_Key)).contents
             # 注入文本/退格、修饰键、配置热键和 Alt+Tab 不改变目标内插入位置。
@@ -72,7 +80,7 @@ class InputActivityGuard:
 
     def _is_hotkey(self, vk: int) -> bool:
         return any(vk in group for group in self._hotkey_groups) and all(
-            vk in group or any(_pressed(candidate) for candidate in group)
+            vk in group or any(candidate in self._down for candidate in group)
             for group in self._hotkey_groups
         )
 
