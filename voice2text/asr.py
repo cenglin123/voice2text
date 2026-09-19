@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from time import perf_counter_ns
 
 import numpy as np
 import sherpa_onnx
@@ -63,6 +64,7 @@ class ASRSessionWorker(threading.Thread):
         sample_rate: int,
         on_partial,
         on_sentence,
+        metrics=None,
     ) -> None:
         super().__init__(daemon=True, name="asr-worker")
         self._asr = asr
@@ -70,6 +72,7 @@ class ASRSessionWorker(threading.Thread):
         self._sample_rate = sample_rate
         self._on_partial = on_partial
         self._on_sentence = on_sentence
+        self._metrics = metrics
         self._last_partial = ""
         self.error: str | None = None  # 识别线程致命异常（上屏 IO 失败等），主循环据此善后
 
@@ -89,14 +92,20 @@ class ASRSessionWorker(threading.Thread):
     def _run_loop(self) -> None:
         stream = self._asr.recognizer.create_stream()
         while True:
+            wait_started = perf_counter_ns()
             try:
                 chunk = self._queue.get(timeout=0.5)
             except queue.Empty:
                 continue  # 无新音频时轻轮询（保留未来取消会话的扩展点）
+            if self._metrics is not None:
+                self._metrics.record("audio_queue_wait", perf_counter_ns() - wait_started)
             if chunk is None:
                 break
             stream.accept_waveform(self._sample_rate, chunk)
+            decode_started = perf_counter_ns()
             text = self._asr.decode(stream)
+            if self._metrics is not None:
+                self._metrics.record("asr_decode", perf_counter_ns() - decode_started)
             if text and text != self._last_partial:
                 self._last_partial = text
                 self._on_partial(text)
@@ -104,13 +113,19 @@ class ASRSessionWorker(threading.Thread):
                 self._finish_sentence(stream)
         # 流结束（Alt+V 停止）：尾句最终解码后产出
         stream.input_finished()
+        decode_started = perf_counter_ns()
         final = self._asr.decode(stream)
+        if self._metrics is not None:
+            self._metrics.record("asr_final_decode", perf_counter_ns() - decode_started)
         if final:
             self._on_partial(final)  # 先把屏幕上的 partial 同步到最终文本
             self._on_sentence(final)
 
     def _finish_sentence(self, stream: sherpa_onnx.OnlineStream) -> None:
+        decode_started = perf_counter_ns()
         text = self._asr.decode(stream)
+        if self._metrics is not None:
+            self._metrics.record("asr_endpoint_decode", perf_counter_ns() - decode_started)
         if text:
             self._on_partial(text)
             self._on_sentence(text)

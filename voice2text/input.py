@@ -5,7 +5,7 @@
 - 开始时锁定窗口/控件；已知终端允许原生焦点检测，其他 UIA 异常停止输入
 - 默认用 SendInput Unicode 注入直接上屏（不经剪贴板，不污染剪贴板历史）；
   个别不认 VK_PACKET 的应用可用 config.input_clipboard=true 回退剪贴板粘贴路径
-- 记账：_current 跟踪当前句已上屏 partial，整句刷新 = 退格 len(_current) 次 + 插入新句
+- 记账：_current 跟踪当前句已上屏 partial；刷新只替换最长公共前缀之后的变化尾部
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from time import perf_counter_ns
 
 import keyboard  # type: ignore[import-untyped]  # 仅剪贴板兜底路径使用
 import pyperclip  # type: ignore[import-untyped]  # 同上
@@ -30,15 +31,18 @@ class TextInserter:
         self,
         process_blacklist: list[str] | None = None,
         use_clipboard: bool = False,
+        metrics=None,
     ) -> None:
         self._blacklist = {self._norm_process(p) for p in (process_blacklist or [])}
         self._use_clipboard = use_clipboard
+        self._metrics = metrics
         self._current = ""  # 当前句已上屏的 partial（含句间空格 prefix）
         self._committed_texts: list[str] = []  # 已锁句的屏幕文本（含 prefix），按句序
         self._last_committed_tail = ""  # 上句结尾（决定句间是否补空格）
         self._detached = False  # 本句脱管：焦点离开编辑框后放弃本句剩余 partial，防止重复上屏
         self.aborted = False  # 注入失败导致会话停写（主循环据此提示用户）
         self._session_open = False
+        self._generation = 0
         self._lock = threading.RLock()  # 识别线程（partial/commit）与校对（replace_committed_range）并发写
         self._target: InputTarget | None = None
         self.abort_reason = ""
@@ -62,9 +66,10 @@ class TextInserter:
 
     # ---- 会话生命周期 ----
 
-    def begin_session(self, target: InputTarget) -> None:
+    def begin_session(self, target: InputTarget) -> int:
         """开启会话。不经剪贴板，无保存/恢复动作。"""
         with self._lock:
+            self._generation += 1
             self._current = ""
             self._committed_texts = []
             self._detached = False
@@ -73,11 +78,16 @@ class TextInserter:
             self._target = target
             self._session_open = True
             self._last_committed_tail = ""  # 新会话的光标位置不一定与上次相同
+            return self._generation
 
-    def end_session(self) -> None:
+    def end_session(self, expected_generation: int | None = None) -> bool:
         """关闭会话（此后所有写入 no-op）。"""
-        self._session_open = False
-        self._target = None
+        with self._lock:
+            if expected_generation is not None and expected_generation != self._generation:
+                return False
+            self._session_open = False
+            self._target = None
+            return True
 
     def abort(self, reason: str) -> None:
         """立即关闭写入闸门；不等待持锁的注入批次。"""
@@ -92,10 +102,14 @@ class TextInserter:
         """主循环维持原前台，覆盖停止后的校对阶段。"""
         if not self._session_open or self._target is None:
             return False
+        started = perf_counter_ns()
         try:
             restored = self._target.restore()
         except Exception:
             restored = False
+        if self._metrics is not None:
+            self._metrics.record("target_restore", perf_counter_ns() - started,
+                                 "ok" if restored else "failed")
         if not restored:
             self.abort("原输入窗口已关闭或焦点无法安全恢复，已停止上屏")
             return False
@@ -132,9 +146,15 @@ class TextInserter:
                 self._detached = True
                 self._current = ""
                 return False
+            # sherpa partial 会修正尾部，但大部分前缀稳定。只替换分歧后的尾部，
+            # 避免每 250ms 整句清空再重打造成闪烁，也显著降低长句注入延迟。
+            common = 0
+            common_limit = min(len(self._current), len(target))
+            while common < common_limit and self._current[common] == target[common]:
+                common += 1
             try:
-                self._delete_chars(len(self._current))
-                self._insert_text(target)
+                self._delete_chars(len(self._current) - common)
+                self._insert_text(target[common:])
             except Exception as exc:  # noqa: BLE001 —— 注入失败：屏幕状态未知，本句脱管
                 self._detached = True
                 self._current = ""
@@ -162,7 +182,9 @@ class TextInserter:
             self._detached = False
             return committed
 
-    def replace_committed_range(self, start: int, end: int, new_text: str) -> bool:
+    def replace_committed_range(
+        self, start: int, end: int, new_text: str, expected_generation: int | None = None
+    ) -> bool:
         """用校对结果替换第 start..end 句（含）的已上屏文本（校对替换的唯一入口）。
 
         光标处只能"从后往前删"：替换中间句需要退格掉其后所有已上屏内容
@@ -170,6 +192,8 @@ class TextInserter:
         与识别线程的并发由 _lock 串行化。
         """
         with self._lock:
+            if expected_generation is not None and expected_generation != self._generation:
+                return False
             if not self._session_open:
                 return False
             if not (0 <= start <= end < len(self._committed_texts)):

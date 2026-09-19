@@ -59,20 +59,21 @@ def main():
         locked = InputTarget.capture(set())
         inserter = TextInserter()
         inserter.begin_session(locked)
-        assert inserter.replace_current("原窗口测试")
+        assert inserter.replace_current("原窗口文字")
+        assert inserter.replace_current("原窗口文本测试")
         inserter.commit_current()
         assert destination(second).restore(), "cannot switch to second editor"
         assert inserter.guard_focus(), "original focus not restored"
-        assert inserter.replace_committed_range(0, 0, "原窗口测试。")
+        assert inserter.replace_committed_range(0, 0, "原窗口文本测试。")
         time.sleep(0.1)
-        assert text(first[1]) == "原窗口测试。", repr(text(first[1]))
+        assert text(first[1]) == "原窗口文本测试。", repr(text(first[1]))
         assert text(second[1]) == "", repr(text(second[1]))
         _user.PostMessageW(first[0], 0x10, 0, 0)  # WM_CLOSE，仅本脚本窗口
         time.sleep(0.1)
         assert not inserter.guard_focus()
         assert not inserter.replace_current("不得写入第二个窗口")
         assert text(second[1]) == ""
-        print("PASS native Unicode input, focus recovery, proofreading destination, closed target")
+        print("PASS native Unicode suffix refresh, focus recovery, proofreading destination, closed target")
     finally:
         process.terminate()
         process.wait(timeout=5)

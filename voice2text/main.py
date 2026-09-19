@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import types
+from time import perf_counter_ns
 
 import winsound
 
@@ -29,6 +30,7 @@ from voice2text.config import AppConfig, PROJECT_ROOT, load_config
 from voice2text.hotkey import HotkeyListener
 from voice2text.input import TextInserter
 from voice2text.proofread import Proofreader, chunk_sentences
+from voice2text.performance import PerformanceRecorder
 
 ASR_REQUIRED_FILES = (
     "encoder-epoch-99-avg-1.onnx",
@@ -61,13 +63,17 @@ class DictationApp:
         self._capture = MicrophoneCapture(
             target_rate=cfg.sample_rate, debug_dump_wav=cfg.debug_dump_wav
         )
+        self._metrics = PerformanceRecorder()
         self._inserter = TextInserter(
-            cfg.non_editable_process_blacklist, use_clipboard=cfg.input_clipboard
+            cfg.non_editable_process_blacklist, use_clipboard=cfg.input_clipboard,
+            metrics=self._metrics,
         )
         self._asr: StreamingASR | None = None
         self._proofreader: Proofreader | None = None
         self._worker: ASRSessionWorker | None = None
         self._session_gen = 0  # 会话代数：旧 worker 的迟到回调不得写新会话的屏
+        self._input_session = 0  # TextInserter 会话代数：迟到校对不得写入新会话
+        self._cancelled_sessions: set[int] = set()
         self._locked_sentences: list[str] = []
         self.hotkey: HotkeyListener | None = None
         self.cmd_queue: "queue.Queue[tuple[str, None]]" = queue.Queue()
@@ -122,7 +128,10 @@ class DictationApp:
         self._busy = True
         if self._active:
             self.push_state("proofreading")
-            self._session_thread = threading.Thread(target=self._finish_toggle, daemon=True)
+            token = self._input_session
+            self._session_thread = threading.Thread(
+                target=lambda: self._finish_toggle(token), daemon=True
+            )
         else:
             try:
                 from voice2text.activity import InputActivityGuard
@@ -130,7 +139,7 @@ class DictationApp:
                 if self._activity_guard is not None:
                     self._activity_guard.close()
                 self._activity_guard = InputActivityGuard(self._inserter, self._cfg.hotkey)
-                self._inserter.begin_session(target)
+                self._input_session = self._inserter.begin_session(target)
                 print(f"[目标锁定] {target.process}，听写至校对完成前保持原窗口焦点")
             except Exception as exc:
                 self._busy = False
@@ -156,19 +165,22 @@ class DictationApp:
             self._busy = False
             pythoncom.CoUninitialize()
 
-    def _finish_toggle(self) -> None:
+    def _finish_toggle(self, token: int) -> None:
         import pythoncom
         pythoncom.CoInitialize()
         try:
-            self._stop_session()
-            self.push_state("error" if self._inserter.aborted else "idle")
+            self._stop_session(token)
+            if self._input_session == token:
+                self.push_state("error" if self._inserter.aborted else "idle")
         except Exception as exc:
             print(f"[停止异常] {exc}")
             self.push_state("error")
         finally:
-            self._inserter.end_session()
-            self._active = False
-            self._busy = False
+            self._inserter.end_session(token)
+            if self._input_session == token:
+                self._active = False
+                self._busy = False
+            self._cancelled_sessions.discard(token)
             pythoncom.CoUninitialize()
 
     def _start_session(self) -> None:
@@ -199,19 +211,21 @@ class DictationApp:
             self._capture.stop()
             return
         self._locked_sentences = []
+        self._metrics.reset()
         self._worker = ASRSessionWorker(
             asr=self._asr,
             audio_queue=self._capture.queue,
             sample_rate=self._cfg.sample_rate,
             on_partial=lambda text: self._on_partial(gen, text),
             on_sentence=lambda text: self._on_sentence(gen, text),
+            metrics=self._metrics,
         )
         self._worker.start()
         self._active = True
         self._cue("start")
         print(f"[听写中] 再按 {self._cfg.hotkey} 停止")
 
-    def _stop_session(self) -> None:
+    def _stop_session(self, token: int) -> None:
         self._capture.stop()  # None 哨兵 → 识别线程完成尾句后退出
         if self._worker is not None:
             self._worker.join(timeout=5.0)
@@ -220,13 +234,19 @@ class DictationApp:
                 self._inserter.abort("识别线程停止超时，保留已上屏内容")
             self._worker = None
         self._session_gen += 1  # 正常尾句已排空，此后拦截迟到回调
-        self._finalize_proofread()
-        self._inserter.end_session()
-        self._active = False
-        self._cue("stop")
-        print("[已停止] 待命中")
+        self._finalize_proofread(token)
+        if token not in self._cancelled_sessions:
+            self._inserter.end_session(token)
+            if self._input_session == token:
+                self._active = False
+                self._cue("stop")
+                print("[已停止] 待命中")
+        if self._input_session == token and token not in self._cancelled_sessions:
+            summary = self._metrics.format_summary()
+            if summary:
+                print(f"[性能] {summary}")
 
-    def _finalize_proofread(self) -> None:
+    def _finalize_proofread(self, token: int) -> None:
         """停止后统一校对：按锁定句分块校对、逐块替换（块序号随替换收缩平移）。"""
         if not self._cfg.proofread_enabled or self._proofreader is None:
             return
@@ -237,19 +257,88 @@ class DictationApp:
         chunks = chunk_sentences(sentences)
         shift = 0
         optimized = 0
-        for start, end, text in chunks:
-            if self._closing or self._inserter.aborted:
+        unchanged = 0
+        failed = 0
+        outcomes = {
+            "cleanup_success": 0,
+            "punctuation_model_success": 0,
+            "terminal_fallback": 0,
+            "model_none": 0,
+            "replacement_failed": 0,
+            "cancelled": 0,
+        }
+        for index, (start, end, text) in enumerate(chunks, 1):
+            if self._closing or self._inserter.aborted or token in self._cancelled_sessions:
+                outcomes["cancelled"] += len(chunks) - index + 1
                 break
             t0 = time.monotonic()
-            corrected = self._proofreader.proofread(text)
-            if self._closing or self._inserter.aborted:
+            proofread_started = perf_counter_ns()
+            timer = threading.Timer(
+                self._cfg.proofread_hard_timeout_seconds,
+                self._cancel_stalled_proofread,
+                args=(token, index),
+            )
+            timer.daemon = True
+            timer.start()
+            try:
+                if callable(getattr(type(self._proofreader), "proofread_with_outcome", None)):
+                    corrected, outcome = self._proofreader.proofread_with_outcome(text)
+                else:
+                    corrected = self._proofreader.proofread(text)
+                    outcome = getattr(self._proofreader, "last_outcome", "model_returned")
+            finally:
+                timer.cancel()
+            if self._closing or self._inserter.aborted or token in self._cancelled_sessions:
+                outcomes["cancelled"] += len(chunks) - index + 1
                 break
-            if corrected is None or time.monotonic() - t0 > self._cfg.proofread_timeout_seconds:
+            if token != self._input_session:
+                outcomes["cancelled"] += len(chunks) - index + 1
+                break
+            self._metrics.record("proofread_generate", perf_counter_ns() - proofread_started, outcome)
+            elapsed = time.monotonic() - t0
+            if corrected is None:
+                failed += 1
+                outcomes["model_none"] += 1
+                print(f"[校对跳过] 第 {index} 块未返回可靠结果")
                 continue
-            if self._inserter.replace_committed_range(start - shift, end - shift, corrected):
-                optimized += 1
+            if outcome in outcomes:
+                outcomes[outcome] += 1
+            if elapsed > self._cfg.proofread_timeout_seconds:
+                # 旧逻辑在等待已经结束后丢弃正确结果，既没有缩短等待又导致校对失效。
+                print(f"[校对较慢] 第 {index} 块用时 {elapsed:.1f}s，结果仍会应用")
+            changed = corrected.strip() != text.strip()
+            replacement_started = perf_counter_ns()
+            replaced = self._inserter.replace_committed_range(
+                start - shift, end - shift, corrected, expected_generation=token
+            )
+            self._metrics.record("proofread_replace", perf_counter_ns() - replacement_started,
+                                 "ok" if replaced else "failed")
+            if replaced:
+                optimized += int(changed)
+                unchanged += int(not changed)
                 shift += end - start
-        print(f"[校对完成] {optimized}/{len(chunks)} 块已优化")
+            else:
+                failed += 1
+                outcomes["replacement_failed"] += 1
+                print(f"[校对替换失败] 第 {index} 块未能安全恢复原输入位置")
+        detail = f"，{unchanged} 块无需修改" if unchanged else ""
+        failure = f"，{failed} 块未应用" if failed else ""
+        model_detail = "，".join(
+            f"{name}={count}" for name, count in outcomes.items() if count
+        )
+        suffix = f"（{model_detail}）" if model_detail else ""
+        print(f"[校对完成] {optimized}/{len(chunks)} 块已优化{detail}{failure}{suffix}")
+
+    def _cancel_stalled_proofread(self, token: int, index: int) -> None:
+        """校对硬超时只取消逻辑会话；迟到模型输出受 TextInserter 代数闸门拦截。"""
+        if self._closing or token != self._input_session or token in self._cancelled_sessions:
+            return
+        self._cancelled_sessions.add(token)
+        self._inserter.end_session(token)
+        self._active = False
+        self._busy = False
+        self.push_state("error")
+        print(f"[校对超时] 第 {index} 块超过 {self._cfg.proofread_hard_timeout_seconds:.0f}s，已释放输入焦点")
 
     def _cue(self, kind: str) -> None:
         if self._cfg.sound_cue:
@@ -263,12 +352,18 @@ class DictationApp:
     def _on_partial(self, gen: int, text: str) -> None:
         if gen != self._session_gen:
             return
-        self._inserter.replace_current(text)
+        started = perf_counter_ns()
+        written = self._inserter.replace_current(text)
+        self._metrics.record("partial_write", perf_counter_ns() - started,
+                             "ok" if written else "failed")
 
     def _on_sentence(self, gen: int, text: str) -> None:
         if gen != self._session_gen:
             return
-        self._inserter.replace_current(text)
+        started = perf_counter_ns()
+        written = self._inserter.replace_current(text)
+        self._metrics.record("partial_write", perf_counter_ns() - started,
+                             "ok" if written else "failed")
         committed = self._inserter.commit_current()
         if committed:
             self._locked_sentences.append(committed)
@@ -304,12 +399,14 @@ class DictationApp:
                 print(f"[听写中断] {reason}")
                 self.push_state("proofreading")
                 self._busy = True
-                threading.Thread(target=self._finish_toggle, daemon=True).start()
+                token = self._input_session
+                threading.Thread(target=lambda: self._finish_toggle(token), daemon=True).start()
             elif self._capture.seconds_since_audio() > WATCHDOG_SECONDS:
                 print("[听写中断] 麦克风无响应，可能已断开。请检查设备后重新开始。")
                 self.push_state("proofreading")
                 self._busy = True
-                threading.Thread(target=self._finish_toggle, daemon=True).start()
+                token = self._input_session
+                threading.Thread(target=lambda: self._finish_toggle(token), daemon=True).start()
 
     def shutdown(self) -> None:
         """先关写入闸门，防止退出过程中的迟到识别/校对继续写入。"""

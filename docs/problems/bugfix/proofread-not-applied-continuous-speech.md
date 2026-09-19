@@ -5,14 +5,14 @@ title: 连续说话时校对完全不生效（无标点、语气词残留）
 status: fixed
 severity: high
 liveness: active
-last_confirmed: ""
-confirmed_count: 0
+last_confirmed: 2026-09-19
+confirmed_count: 1
 tags: [校对, Qwen, endpoint, 分句]
 related_files: [voice2text/proofread.py, voice2text/config.py, voice2text/main.py]
 verification:
   level: manual
 created_at: 2026-09-18
-updated_at: 2026-09-18
+updated_at: 2026-09-19
 evidence:
   - type: user_quote
     ref: "有一个问题就是没有标准符号全是文字连空格都没有啊这句话就是我刚才用语音输入输入的"
@@ -50,7 +50,7 @@ evidence:
 1. endpoint_pause_seconds 1.5 → 0.8（config 默认值与 config.json）
 2. 校对 prompt 强化：明确"无论句子多长必须加标点，绝不能照抄"+ 增加长句示例
 3. 照抄检测重试：结果与原文相同且原文无标点时，temperature 加温到 0.8 重试一次
-4. 交互重构（用户决策）：听写期间屏幕文字只增不改；停止后把锁定句按 ≤60 字分块，
+4. 交互重构（用户决策）：听写期间稳定前缀不回写，停止后把锁定句按 ≤60 字分块，
    逐块统一校对并替换（main._finalize_proofread），校对后台线程删除——分块同时
    规避了长文本照抄问题，替换记账改为 replace_committed_range（块内多句合并替换）
 
@@ -64,10 +64,11 @@ evidence:
 
 ## 风险和后续
 
-- 停止后有数秒校对等待期（取决于文本量），期间按 Alt+V 会排队到校对结束后生效
+- 10 秒仅提示慢校对，结果仍会应用；单块 30 秒没有返回时会释放输入焦点，迟到结果无法写入后续会话
 - 分块替换在屏幕上逐块跳动数次，若体验差可改为全部块完成后一次性替换
 - 阶段 5 评估：换 Qwen3-4B 对比校对质量/速度
 
 ## 变更历史
 
 - 2026-09-18: 初始修复（阈值/prompt/重试）+ 交互重构（停止后统一校对）
+- 2026-09-19: 修正事后超时丢弃、区分模型校对与标点兜底，并加入会话代数阻断迟到结果

@@ -24,6 +24,8 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _THINK_UNCLOSED = re.compile(r"<think>.*$", re.DOTALL)  # max_tokens 截断在思考段内
 _OUTPUT_PREFIX = re.compile(r"^(?:输出|校对后|结果)[：:]\s*")
 _HAS_PUNCT = re.compile(r"[，。？！、；：,.?!]")
+_HAS_TERMINAL = re.compile(r"[。？！.!?]$")
+_HAS_CJK = re.compile(r"[\u3400-\u9fff]")
 
 SYSTEM_PROMPT = (
     "你是语音转录校对器。输入是一句中文语音识别的原始结果，可能包含错别字"
@@ -77,6 +79,7 @@ class Proofreader:
 
     def __init__(self, cfg: AppConfig) -> None:
         self._lock = threading.Lock()
+        self.last_outcome = "not_run"
         self._llm = llama_cpp.Llama(
             model_path=str(cfg.llm_model_path),
             n_ctx=1024,  # 分块校对足够（系统提示 ~250 token + 块文本 + 输出）
@@ -85,6 +88,12 @@ class Proofreader:
         )
 
     def proofread(self, text: str) -> str | None:
+        """兼容调用入口；并发调用方应使用 proofread_with_outcome。"""
+        result, outcome = self.proofread_with_outcome(text)
+        self.last_outcome = outcome
+        return result
+
+    def proofread_with_outcome(self, text: str) -> tuple[str | None, str]:
         """校对一块文本。返回校正文本；失败/可疑时返回 None（调用方保留原文）。
 
         两段式：先清理（错字/语气词/顺句）；原文无标点而结果仍无标点时
@@ -93,14 +102,31 @@ class Proofreader:
         """
         text = text.strip()
         if not text:
-            return None
+            return None, "empty"
         result = self._generate(text, SYSTEM_PROMPT, temperature=0.3)
-        if result is not None and not _HAS_PUNCT.search(text) and not _HAS_PUNCT.search(result):
-            punctuated = self._generate(result, PUNCT_SYSTEM_PROMPT, temperature=0.3)
+        # 清理任务失败或仍未给出标点时，始终再走一次只加标点的窄任务。
+        # 这条路径只允许插入标点，因此可以安全地从原文直接降级。
+        base = result or text
+        if not _HAS_PUNCT.search(base):
+            punctuated = self._generate(base, PUNCT_SYSTEM_PROMPT, temperature=0.3)
             if punctuated is not None and _HAS_PUNCT.search(punctuated):
-                if _NO_PUNCT.sub("", punctuated) == _NO_PUNCT.sub("", result):
-                    result = punctuated
-        return result
+                if _NO_PUNCT.sub("", punctuated) == _NO_PUNCT.sub("", base):
+                    return self._ensure_terminal(punctuated), "punctuation_model_success"
+        if result is not None and _HAS_PUNCT.search(result):
+            return self._ensure_terminal(result), "cleanup_success"
+        # 清理输出无标点且窄任务未成功时，不能把可能改写过的清理结果直接上屏。
+        # 降级必须回到原始识别文本，只允许补一个句末符号。
+        result = text
+        # 两次本地模型调用都失败时也不能把无标点原文原样留下；只补句末符号，
+        # 不猜测内部断句，不改变任何识别文字。
+        return self._ensure_terminal(result), "terminal_fallback"
+
+    @staticmethod
+    def _ensure_terminal(text: str) -> str:
+        """只给中文自然语言兜底补句末符号，数字、URL、路径等保持原样。"""
+        if _HAS_CJK.search(text) and not _HAS_TERMINAL.search(text):
+            return text + "。"
+        return text
 
     def _generate(self, text: str, system: str, temperature: float) -> str | None:
         max_tokens = min(512, len(text) * 3 + 64)

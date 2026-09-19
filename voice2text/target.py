@@ -46,6 +46,7 @@ _kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, 
 _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
+_VOLATILE_UIA = {("chatgpt", "Chrome_WidgetWin_1")}
 
 
 def foreground() -> int:
@@ -108,7 +109,9 @@ class InputTarget:
         focus = _focus(tid)
         if not focus:
             raise RuntimeError("无法确定目标输入控件")
-        terminal = _class(hwnd) in _TERMINALS
+        window_class = _class(hwnd)
+        terminal = window_class in _TERMINALS
+        volatile_uia = (process, window_class) in _VOLATILE_UIA
         runtime_id = ()
         try:
             ctrl = auto.GetFocusedControl()
@@ -127,6 +130,11 @@ class InputTarget:
                     editable = not value.IsReadOnly
                 if not editable or not runtime_id:
                     raise RuntimeError("当前控件不可编辑，请将光标放入输入框")
+                # ChatGPT 桌面端会在流式文本更新时重建 WebView UIA 节点，RuntimeId
+                # 随之变化，但原生焦点 HWND 保持不变。物理鼠标/键盘切换另由
+                # InputActivityGuard 立即关闸，因此会话内可安全使用稳定原生身份。
+                if volatile_uia:
+                    runtime_id = ()
         except Exception as exc:
             if not terminal:
                 raise RuntimeError("无法验证目标输入控件，听写未开始") from exc

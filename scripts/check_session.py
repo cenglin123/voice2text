@@ -1,6 +1,7 @@
 """离线回归：模拟焦点与注入，不向用户窗口发送按键，不加载模型。"""
 from pathlib import Path
 import sys
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -13,6 +14,8 @@ from pystray._util import win32
 from voice2text.activity import InputActivityGuard
 from voice2text.main import DictationApp
 from voice2text.config import AppConfig, DEFAULTS
+from voice2text.proofread import Proofreader
+from voice2text.performance import PerformanceRecorder
 
 
 class SessionTests(unittest.TestCase):
@@ -30,8 +33,8 @@ class SessionTests(unittest.TestCase):
             guard()
             if n:
                 self.screen = self.screen[:-n]
-        self.enterContext(patch.object(keysender, "send_text", side_effect=text))
-        self.enterContext(patch.object(keysender, "send_backspaces", side_effect=back))
+        self.send_text = self.enterContext(patch.object(keysender, "send_text", side_effect=text))
+        self.send_backspaces = self.enterContext(patch.object(keysender, "send_backspaces", side_effect=back))
 
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
@@ -71,9 +74,30 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.inserter.replace_committed_range(1, 1, "第三句。"))
         self.assertEqual(self.screen, "第一句第二句第三句。")
 
+    def test_partial_refresh_only_replaces_changed_suffix(self):
+        self.inserter.replace_current("识别文字是不是实时")
+        self.inserter.replace_current("识别文本是不是实时的")
+        self.assertEqual(self.screen, "识别文本是不是实时的")
+        self.assertEqual(self.send_backspaces.call_args.args[0], 6)
+        self.assertEqual(self.send_text.call_args.args[0], "本是不是实时的")
+
+    def test_slow_proofread_result_is_still_applied(self):
+        self.inserter.replace_current("测试文本")
+        self.inserter.commit_current()
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._inserter = self.inserter
+        app._input_session = 1
+        app._locked_sentences = ["测试文本"]
+        app._proofreader = Mock()
+        app._proofreader.proofread.return_value = "测试文本。"
+        with patch("voice2text.main.time.monotonic", side_effect=[0.0, 11.0]):
+            app._finalize_proofread(1)
+        self.assertEqual(self.screen, "测试文本。")
+
     def test_tail_callback_before_generation_invalidated(self):
         app = DictationApp(AppConfig(**DEFAULTS))
         app._inserter = self.inserter
+        app._input_session = 1
         app._capture = Mock()
         app._cfg.proofread_enabled = False
         app._cfg.sound_cue = False
@@ -81,18 +105,53 @@ class SessionTests(unittest.TestCase):
         worker.is_alive.return_value = False
         worker.join.side_effect = lambda **kwargs: app._on_sentence(0, "尾句")
         app._worker = worker
-        app._stop_session()
+        app._stop_session(1)
         app._on_sentence(0, "迟到旧回调")
         self.assertEqual(self.screen, "尾句")
 
+    def test_hard_timeout_closes_old_input_generation_and_blocks_late_replacement(self):
+        self.inserter.replace_current("旧会话")
+        self.inserter.commit_current()
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._inserter = self.inserter
+        app._input_session = 1
+        app._active = True
+        app._busy = True
+        app._cancel_stalled_proofread(1, 1)
+        self.assertFalse(app._active)
+        self.assertFalse(app._busy)
+        self.assertFalse(self.inserter.replace_committed_range(0, 0, "错误写入", 1))
+        next_generation = self.inserter.begin_session(self.destination)
+        self.assertNotEqual(next_generation, 1)
+        self.assertFalse(self.inserter.replace_committed_range(0, 0, "迟到结果", 1))
+
+    def test_hanging_proofread_timer_releases_focus_and_discards_late_result(self):
+        self.inserter.replace_current("等待校对")
+        self.inserter.commit_current()
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._inserter = self.inserter
+        app._input_session = 1
+        app._locked_sentences = ["等待校对"]
+        app._cfg.proofread_hard_timeout_seconds = 0.01
+        app._active = True
+        app._busy = True
+        app._proofreader = Mock()
+        app._proofreader.proofread.side_effect = lambda _: (time.sleep(0.03), "错误迟到结果")[1]
+        app._finalize_proofread(1)
+        self.assertTrue(self.inserter.replace_current("" ) is False)
+        self.assertEqual(self.screen, "等待校对")
+        self.assertFalse(app._active)
+        self.assertFalse(app._busy)
+
 
 class TargetTests(unittest.TestCase):
-    def capture(self, terminal=True, control=None):
+    def capture(self, terminal=True, control=None, process="windowsterminal", window_class=None):
+        class_name = window_class or ("CASCADIA_HOSTING_WINDOW_CLASS" if terminal else "unknown")
         with patch.object(target, "foreground", return_value=123), \
              patch.object(target, "_identity", return_value=(45, 999999)), \
-             patch.object(target, "_process_name", return_value="windowsterminal"), \
+             patch.object(target, "_process_name", return_value=process), \
              patch.object(target, "_focus", return_value=124), \
-             patch.object(target, "_class", return_value="CASCADIA_HOSTING_WINDOW_CLASS" if terminal else "unknown"), \
+             patch.object(target, "_class", return_value=class_name), \
              patch.object(target.auto, "GetFocusedControl", return_value=control):
             return target.InputTarget.capture(set())
 
@@ -105,6 +164,15 @@ class TargetTests(unittest.TestCase):
     def test_unknown_uia_failure_rejected(self):
         with self.assertRaises(RuntimeError):
             self.capture(terminal=False)
+
+    def test_chatgpt_webview_uses_stable_native_focus_after_initial_editable_check(self):
+        ctrl = Mock(ControlTypeName="EditControl")
+        ctrl.GetRuntimeId.return_value = [1, 2]
+        ctrl.GetValuePattern.return_value = None
+        dest = self.capture(terminal=False, control=ctrl, process="chatgpt",
+                            window_class="Chrome_WidgetWin_1")
+        self.assertEqual(dest.runtime_id, ())
+        self.assertFalse(dest.terminal)
 
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()
@@ -119,6 +187,48 @@ class TargetTests(unittest.TestCase):
              patch.object(target.InputTarget, "valid", return_value=False):
             self.assertFalse(dest.restore())
 
+
+class ProofreadTests(unittest.TestCase):
+    def test_cleanup_failure_falls_back_to_punctuation_task(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._generate = Mock(side_effect=[None, "这是测试。"])
+        self.assertEqual(proofreader.proofread("这是测试"), "这是测试。")
+
+    def test_model_failure_still_adds_terminal_punctuation(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._generate = Mock(side_effect=[None, None])
+        self.assertEqual(proofreader.proofread("这是测试"), "这是测试。")
+        self.assertEqual(proofreader.last_outcome, "terminal_fallback")
+
+    def test_result_with_only_internal_punctuation_gets_terminal_mark(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._generate = Mock(return_value="这是测试，继续")
+        self.assertEqual(proofreader.proofread("这是测试继续"), "这是测试，继续。")
+
+    def test_terminal_fallback_never_punctuates_number_url_or_path(self):
+        for value in ("20260919", "https://example.com/a", r"C:\\temp\\note.txt"):
+            proofreader = Proofreader.__new__(Proofreader)
+            proofreader._generate = Mock(side_effect=[None, None])
+            self.assertEqual(proofreader.proofread(value), value)
+
+
+class PerformanceTests(unittest.TestCase):
+    def test_summary_groups_result_codes_and_hides_small_sample_p95(self):
+        recorder = PerformanceRecorder(capacity=3)
+        recorder.record("partial_write", 2_000_000, "ok")
+        recorder.record("partial_write", 4_000_000, "failed")
+        report = recorder.summary()["partial_write"]
+        self.assertEqual(report["count"], 2)
+        self.assertEqual(report["p95_ms"], -1.0)
+        self.assertEqual(report["results"], {"ok": 1, "failed": 1})
+
+    def test_ring_buffer_discards_oldest_events(self):
+        recorder = PerformanceRecorder(capacity=2)
+        recorder.record("old", 1)
+        recorder.record("new", 1)
+        recorder.record("new", 1)
+        self.assertNotIn("old", recorder.summary())
+        self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
     def test_output_bounded(self):

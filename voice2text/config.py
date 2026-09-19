@@ -15,6 +15,8 @@ DEFAULTS: dict = {
     "endpoint_pause_seconds": 0.8,
     "proofread_enabled": True,
     "proofread_timeout_seconds": 10,
+    # 10 秒仅提示慢校对；此上限用于释放失去响应的会话及其焦点锁定。
+    "proofread_hard_timeout_seconds": 30,
     "asr_model_dir": "models/asr/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
     "llm_model_path": "models/llm/Qwen3-1.7B-Q4_K_M.gguf",
     "debug_dump_wav": False,
@@ -38,6 +40,7 @@ class AppConfig:
     endpoint_pause_seconds: float
     proofread_enabled: bool
     proofread_timeout_seconds: float
+    proofread_hard_timeout_seconds: float
     asr_model_dir: Path
     llm_model_path: Path
     debug_dump_wav: bool
@@ -79,6 +82,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         endpoint_pause_seconds=float(merged["endpoint_pause_seconds"]),
         proofread_enabled=bool(merged["proofread_enabled"]),
         proofread_timeout_seconds=float(merged["proofread_timeout_seconds"]),
+        proofread_hard_timeout_seconds=float(merged["proofread_hard_timeout_seconds"]),
         asr_model_dir=_resolve(merged["asr_model_dir"]),
         llm_model_path=_resolve(merged["llm_model_path"]),
         debug_dump_wav=bool(merged["debug_dump_wav"]),
