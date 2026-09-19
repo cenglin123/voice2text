@@ -39,6 +39,20 @@ ASR_MS_BASE = (
     "https://modelscope.cn/models/pengzhendong/sherpa-onnx-streaming-zipformer-bilingual-zh-en/resolve/master"
 )
 
+# ---- 停顿标点：sherpa-onnx 中文/英文 CT-Transformer INT8 ----
+PUNCT_NAME = "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8"
+PUNCT_DIR = MODELS_DIR / "punctuation" / PUNCT_NAME
+PUNCT_DEST = PUNCT_DIR / "model.int8.onnx"
+PUNCT_MIN_BYTES = 70_000_000
+PUNCT_TARBALL_URLS = (
+    f"https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/{PUNCT_NAME}.tar.bz2",
+)
+PUNCT_FILE_URLS = (
+    f"https://modelscope.cn/models/csukuangfj/{PUNCT_NAME}/resolve/master/model.int8.onnx",
+    f"https://huggingface.co/lorneluo/{PUNCT_NAME}/resolve/main/model.int8.onnx",
+    f"https://hf-mirror.com/lorneluo/{PUNCT_NAME}/resolve/main/model.int8.onnx",
+)
+
 # ---- 校对模型：Qwen3-1.7B Q4_K_M GGUF（unsloth 量化版，官方仓只有 Q8_0）----
 LLM_FILE = "Qwen3-1.7B-Q4_K_M.gguf"
 LLM_DEST = MODELS_DIR / "llm" / LLM_FILE
@@ -160,6 +174,34 @@ def install_llm(force: bool) -> bool:
     return True
 
 
+def install_punctuation(force: bool) -> bool:
+    if not force and PUNCT_DEST.is_file() and PUNCT_DEST.stat().st_size >= PUNCT_MIN_BYTES:
+        print(f"[punctuation] 模型已就绪，跳过（{_human(PUNCT_DEST.stat().st_size)}）")
+        return True
+    PUNCT_DIR.mkdir(parents=True, exist_ok=True)
+    tarball = MODELS_DIR / "punctuation" / f"{PUNCT_NAME}.tar.bz2"
+    if download(PUNCT_TARBALL_URLS, tarball):
+        try:
+            with tarfile.open(tarball, "r:bz2") as tar:
+                member = next(
+                    item for item in tar.getmembers()
+                    if Path(item.name).name == "model.int8.onnx" and item.isfile()
+                )
+                member.name = "model.int8.onnx"
+                tar.extract(member, PUNCT_DIR)
+            tarball.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001
+            tarball.unlink(missing_ok=True)
+            print(f"  [警告] 标点模型解压失败（{exc}），改用镜像下载")
+    if PUNCT_DEST.is_file() and PUNCT_DEST.stat().st_size >= PUNCT_MIN_BYTES:
+        print("[punctuation] 就绪")
+        return True
+    if not download(PUNCT_FILE_URLS, PUNCT_DEST, min_bytes=PUNCT_MIN_BYTES):
+        return False
+    print("[punctuation] 就绪")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="下载 voice2text 所需模型")
     parser.add_argument("--force", action="store_true", help="忽略已有文件强制重下")
@@ -167,6 +209,7 @@ def main() -> int:
 
     print(f"模型目录: {MODELS_DIR}")
     ok = install_asr(args.force)
+    ok = install_punctuation(args.force) and ok
     ok = install_llm(args.force) and ok
     if not ok:
         print("模型下载未完成，请检查网络后重跑（已下载的部分会自动续传）")

@@ -8,15 +8,15 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-19 10:34
+> 最近重建：2026-09-19 15:27
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
 - [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-19
-- [设置窗口四角出现向内的蓝色块](../../docs/problems/bugfix/settings-corner-mask-inset.md) — fixed · low · active · 更新于 2026-09-19
 - [听写失焦后文字或校对可能写到其他位置](../../docs/problems/bugfix/session-target-lock.md) — fixed · high · active · 更新于 2026-09-19
+- [设置窗口四角出现向内的蓝色块](../../docs/problems/bugfix/settings-corner-mask-inset.md) — fixed · low · active · 更新于 2026-09-19
 - [OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — fixed · high · active · 更新于 2026-09-19
 - [毛玻璃悬浮窗圆角锯齿与角落蓝底](../../docs/problems/bugfix/widget-glass-corners.md) — fixed · medium · active · 更新于 2026-09-19
 - [悬浮窗拖动时 ULW 旧坐标撤销 Tk 移动](../../docs/problems/bugfix/widget-drag-position.md) — fixed · medium · active · 更新于 2026-09-18

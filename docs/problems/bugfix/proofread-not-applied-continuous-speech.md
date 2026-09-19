@@ -7,10 +7,13 @@ severity: high
 liveness: active
 last_confirmed: 2026-09-19
 confirmed_count: 1
-tags: [校对, Qwen, endpoint, 分句]
-related_files: [voice2text/proofread.py, voice2text/config.py, voice2text/main.py]
+tags: [校对, Qwen, endpoint, 分句, 标点]
+related_files: [voice2text/proofread.py, voice2text/punctuation.py, voice2text/asr.py, voice2text/config.py, voice2text/main.py]
 verification:
-  level: manual
+  level: automated
+  kind: unit-test
+  path: scripts/check_session.py
+  command: python scripts/check_session.py
 created_at: 2026-09-18
 updated_at: 2026-09-19
 evidence:
@@ -53,6 +56,8 @@ evidence:
 4. 交互重构（用户决策）：听写期间稳定前缀不回写，停止后把锁定句按 ≤60 字分块，
    逐块统一校对并替换（main._finalize_proofread），校对后台线程删除——分块同时
    规避了长文本照抄问题，替换记账改为 replace_committed_range（块内多句合并替换）
+5. endpoint 锁句时先用 sherpa-onnx INT8 标点模型处理；字符一致性门禁保证它只能插入
+   标点，不能改动识别文字。这样即使停止后的 Qwen 校对取消，已锁句仍有基础标点。
 
 ## 验证结果
 
@@ -72,3 +77,4 @@ evidence:
 
 - 2026-09-18: 初始修复（阈值/prompt/重试）+ 交互重构（停止后统一校对）
 - 2026-09-19: 修正事后超时丢弃、区分模型校对与标点兜底，并加入会话代数阻断迟到结果
+- 2026-09-19: 增加停顿锁句标点层；真实中文样例耗时约 5–11ms，覆盖只插标点安全回归

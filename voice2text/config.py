@@ -18,6 +18,8 @@ DEFAULTS: dict = {
     # 10 秒仅提示慢校对；此上限用于释放失去响应的会话及其焦点锁定。
     "proofread_hard_timeout_seconds": 30,
     "asr_model_dir": "models/asr/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+    "punctuation_enabled": True,
+    "punctuation_model_path": "models/punctuation/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/model.int8.onnx",
     "llm_model_path": "models/llm/Qwen3-1.7B-Q4_K_M.gguf",
     "debug_dump_wav": False,
     # 文本上屏方式：默认 SendInput Unicode 注入（不经剪贴板，不污染剪贴板历史）；
@@ -42,6 +44,8 @@ class AppConfig:
     proofread_timeout_seconds: float
     proofread_hard_timeout_seconds: float
     asr_model_dir: Path
+    punctuation_enabled: bool
+    punctuation_model_path: Path
     llm_model_path: Path
     debug_dump_wav: bool
     input_clipboard: bool
@@ -84,6 +88,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         proofread_timeout_seconds=float(merged["proofread_timeout_seconds"]),
         proofread_hard_timeout_seconds=float(merged["proofread_hard_timeout_seconds"]),
         asr_model_dir=_resolve(merged["asr_model_dir"]),
+        punctuation_enabled=bool(merged["punctuation_enabled"]),
+        punctuation_model_path=_resolve(merged["punctuation_model_path"]),
         llm_model_path=_resolve(merged["llm_model_path"]),
         debug_dump_wav=bool(merged["debug_dump_wav"]),
         input_clipboard=bool(merged["input_clipboard"]),

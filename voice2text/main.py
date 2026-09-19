@@ -31,6 +31,7 @@ from voice2text.hotkey import HotkeyListener
 from voice2text.input import TextInserter
 from voice2text.proofread import Proofreader, chunk_sentences
 from voice2text.performance import PerformanceRecorder
+from voice2text.punctuation import PunctuationRestorer
 
 ASR_REQUIRED_FILES = (
     "encoder-epoch-99-avg-1.onnx",
@@ -46,11 +47,17 @@ def check_models(cfg: AppConfig) -> tuple[bool, str]:
     for name in missing_asr:
         print(f"  [缺失] ASR 模型文件: {cfg.asr_file(name)}")
     llm_missing = cfg.proofread_enabled and not cfg.llm_model_path.is_file()
+    punctuation_missing = (
+        cfg.punctuation_enabled and not cfg.punctuation_model_path.is_file()
+    )
     if llm_missing:
         print(f"  [警告] 校对模型缺失（{cfg.llm_model_path}），二次校对将停用")
+    if punctuation_missing:
+        print(f"  [警告] 标点模型缺失（{cfg.punctuation_model_path}），停顿标点将停用")
     detail = "；".join(
         [f"识别模型缺失: {n}" for n in missing_asr]
         + ([f"校对模型缺失: {cfg.llm_model_path.name}（可继续使用，无二次校对）"] if llm_missing else [])
+        + ([f"标点模型缺失: {cfg.punctuation_model_path.name}（可继续使用，无停顿标点）"] if punctuation_missing else [])
     )
     return (len(missing_asr) == 0), detail
 
@@ -70,6 +77,7 @@ class DictationApp:
         )
         self._asr: StreamingASR | None = None
         self._proofreader: Proofreader | None = None
+        self._punctuator: PunctuationRestorer | None = None
         self._worker: ASRSessionWorker | None = None
         self._session_gen = 0  # 会话代数：旧 worker 的迟到回调不得写新会话的屏
         self._input_session = 0  # TextInserter 会话代数：迟到校对不得写入新会话
@@ -102,6 +110,13 @@ class DictationApp:
             try:
                 self._asr = StreamingASR(self._cfg)
                 print("  （后台加载识别模型完成）")
+                if self._cfg.punctuation_enabled:
+                    try:
+                        self._punctuator = PunctuationRestorer(self._cfg)
+                        print("  （后台加载标点模型完成）")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[警告] 标点模型加载失败，停顿标点已停用：{exc}")
+                        self._cfg.punctuation_enabled = False
                 if self._cfg.proofread_enabled:
                     try:
                         self._proofreader = Proofreader(self._cfg)
@@ -200,6 +215,12 @@ class DictationApp:
             except Exception as exc:  # noqa: BLE001
                 print(f"[警告] 校对模型加载失败，二次校对已停用：{exc}")
                 self._cfg.proofread_enabled = False
+        if self._cfg.punctuation_enabled and self._punctuator is None:
+            try:
+                self._punctuator = PunctuationRestorer(self._cfg)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[警告] 标点模型加载失败，停顿标点已停用：{exc}")
+                self._cfg.punctuation_enabled = False
         try:
             self._capture.start()
         except CaptureError as exc:
@@ -218,6 +239,7 @@ class DictationApp:
             sample_rate=self._cfg.sample_rate,
             on_partial=lambda text: self._on_partial(gen, text),
             on_sentence=lambda text: self._on_sentence(gen, text),
+            punctuator=self._punctuator,
             metrics=self._metrics,
         )
         self._worker.start()
@@ -477,7 +499,10 @@ def _gui_main(output) -> int:
             pass
         return 1
     if missing_detail:  # 仅校对模型缺失：降级继续
-        cfg.proofread_enabled = False
+        if cfg.proofread_enabled and not cfg.llm_model_path.is_file():
+            cfg.proofread_enabled = False
+        if cfg.punctuation_enabled and not cfg.punctuation_model_path.is_file():
+            cfg.punctuation_enabled = False
         try:
             import ctypes
 

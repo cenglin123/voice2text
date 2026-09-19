@@ -64,6 +64,7 @@ class ASRSessionWorker(threading.Thread):
         sample_rate: int,
         on_partial,
         on_sentence,
+        punctuator=None,
         metrics=None,
     ) -> None:
         super().__init__(daemon=True, name="asr-worker")
@@ -72,6 +73,7 @@ class ASRSessionWorker(threading.Thread):
         self._sample_rate = sample_rate
         self._on_partial = on_partial
         self._on_sentence = on_sentence
+        self._punctuator = punctuator
         self._metrics = metrics
         self._last_partial = ""
         self.error: str | None = None  # 识别线程致命异常（上屏 IO 失败等），主循环据此善后
@@ -118,8 +120,7 @@ class ASRSessionWorker(threading.Thread):
         if self._metrics is not None:
             self._metrics.record("asr_final_decode", perf_counter_ns() - decode_started)
         if final:
-            self._on_partial(final)  # 先把屏幕上的 partial 同步到最终文本
-            self._on_sentence(final)
+            self._deliver_sentence(final)
 
     def _finish_sentence(self, stream: sherpa_onnx.OnlineStream) -> None:
         decode_started = perf_counter_ns()
@@ -127,7 +128,20 @@ class ASRSessionWorker(threading.Thread):
         if self._metrics is not None:
             self._metrics.record("asr_endpoint_decode", perf_counter_ns() - decode_started)
         if text:
-            self._on_partial(text)
-            self._on_sentence(text)
+            self._deliver_sentence(text)
         self._asr.recognizer.reset(stream)
         self._last_partial = ""
+
+    def _deliver_sentence(self, text: str) -> None:
+        """先同步 ASR 原文，再以只加标点的版本锁句。"""
+        self._on_partial(text)
+        self._on_sentence(self._restore_punctuation(text))
+
+    def _restore_punctuation(self, text: str) -> str:
+        if self._punctuator is None:
+            return text
+        started = perf_counter_ns()
+        result, outcome = self._punctuator.restore(text)
+        if self._metrics is not None:
+            self._metrics.record("punctuation_restore", perf_counter_ns() - started, outcome)
+        return result

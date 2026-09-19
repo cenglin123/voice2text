@@ -22,6 +22,13 @@ from voice2text import keysender
 from voice2text.target import InputTarget
 
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
+_TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
+
+
+def _semantic_tail(text: str) -> str:
+    """返回句末标点之前的最后一个字符，用于判断英文句间空格。"""
+    stripped = _TRAILING_PUNCTUATION.sub("", text.rstrip())
+    return stripped[-1:] if stripped else ""
 
 
 class TextInserter:
@@ -177,7 +184,7 @@ class TextInserter:
             committed = self._current
             if committed:
                 self._committed_texts.append(committed)
-                self._last_committed_tail = committed[-1]
+                self._last_committed_tail = _semantic_tail(committed)
             self._current = ""
             self._detached = False
             return committed
@@ -220,7 +227,7 @@ class TextInserter:
             is_last = end == len(self._committed_texts) - 1
             self._committed_texts[start : end + 1] = [replacement]
             if is_last:
-                self._last_committed_tail = replacement[-1:] if replacement else ""
+                self._last_committed_tail = _semantic_tail(replacement)
             return True
 
     # ---- 底层写入 ----

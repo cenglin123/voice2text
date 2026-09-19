@@ -77,7 +77,7 @@ if errorlevel 1 (
     if errorlevel 1 (echo   [FAIL] dependency installation failed & goto fail)
 )
 
-echo [3/4] Downloading models (~1.4 GB total, resumable) ...
+echo [3/4] Downloading models (~1.5 GB total, resumable) ...
 "%PY%" scripts\download_models.py
 if errorlevel 1 (echo   [FAIL] model download failed, check network and retry & goto fail)
 

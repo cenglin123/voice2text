@@ -16,6 +16,8 @@ from voice2text.main import DictationApp
 from voice2text.config import AppConfig, DEFAULTS
 from voice2text.proofread import Proofreader
 from voice2text.performance import PerformanceRecorder
+from voice2text.punctuation import PunctuationRestorer
+from voice2text.asr import ASRSessionWorker
 
 
 class SessionTests(unittest.TestCase):
@@ -80,6 +82,19 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.screen, "识别文本是不是实时的")
         self.assertEqual(self.send_backspaces.call_args.args[0], 6)
         self.assertEqual(self.send_text.call_args.args[0], "本是不是实时的")
+
+    def test_english_sentence_keeps_space_after_punctuation(self):
+        self.inserter.replace_current("hello world。")
+        self.inserter.commit_current()
+        self.inserter.replace_current("next sentence")
+        self.assertEqual(self.screen, "hello world。 next sentence")
+
+    def test_empty_commit_keeps_previous_english_separator(self):
+        self.inserter.replace_current("hello world。")
+        self.inserter.commit_current()
+        self.inserter.commit_current()
+        self.inserter.replace_current("next")
+        self.assertEqual(self.screen, "hello world。 next")
 
     def test_slow_proofread_result_is_still_applied(self):
         self.inserter.replace_current("测试文本")
@@ -210,6 +225,68 @@ class ProofreadTests(unittest.TestCase):
             proofreader = Proofreader.__new__(Proofreader)
             proofreader._generate = Mock(side_effect=[None, None])
             self.assertEqual(proofreader.proofread(value), value)
+
+
+class PunctuationTests(unittest.TestCase):
+    def restorer(self, result):
+        restorer = PunctuationRestorer.__new__(PunctuationRestorer)
+        restorer._engine = Mock()
+        restorer._engine.add_punctuation.return_value = result
+        return restorer
+
+    def test_accepts_punctuation_only_change(self):
+        result, outcome = self.restorer("现在是什么情况，标点去哪儿了？").restore(
+            "现在是什么情况标点去哪儿了"
+        )
+        self.assertEqual(result, "现在是什么情况，标点去哪儿了？")
+        self.assertEqual(outcome, "applied")
+
+    def test_rejects_any_recognition_text_change(self):
+        original = "准确的识别"
+        result, outcome = self.restorer("准确地识别。").restore(original)
+        self.assertEqual(result, original)
+        self.assertEqual(outcome, "unsafe_change")
+
+    def test_rejects_replacing_existing_punctuation(self):
+        original = "第一句，第二句"
+        result, outcome = self.restorer("第一句。第二句。").restore(original)
+        self.assertEqual(result, original)
+        self.assertEqual(outcome, "unsafe_change")
+
+    def test_projects_english_punctuation_without_removing_source_space(self):
+        original = "hello world this is a test"
+        result, outcome = self.restorer("hello world，this is a test。").restore(original)
+        self.assertEqual(result, "hello world， this is a test。")
+        self.assertEqual(outcome, "applied")
+
+    def test_model_whitespace_does_not_change_decimal_spacing(self):
+        original = "version 1.2 is ready"
+        result, outcome = self.restorer("version 1 . 2 is ready。").restore(original)
+        self.assertEqual(result, "version 1.2 is ready。")
+        self.assertEqual(outcome, "applied")
+
+    def test_worker_records_punctuation_latency_and_result(self):
+        punctuator = Mock()
+        punctuator.restore.return_value = ("测试。", "applied")
+        metrics = PerformanceRecorder()
+        worker = ASRSessionWorker(Mock(), Mock(), 16000, Mock(), Mock(), punctuator, metrics)
+        self.assertEqual(worker._restore_punctuation("测试"), "测试。")
+        self.assertEqual(
+            metrics.summary()["punctuation_restore"]["results"], {"applied": 1}
+        )
+
+    def test_worker_displays_raw_text_then_commits_punctuated_sentence(self):
+        events = []
+        punctuator = Mock()
+        punctuator.restore.return_value = ("这是测试。", "applied")
+        worker = ASRSessionWorker(
+            Mock(), Mock(), 16000,
+            lambda text: events.append(("partial", text)),
+            lambda text: events.append(("sentence", text)),
+            punctuator,
+        )
+        worker._deliver_sentence("这是测试")
+        self.assertEqual(events, [("partial", "这是测试"), ("sentence", "这是测试。")])
 
 
 class PerformanceTests(unittest.TestCase):
