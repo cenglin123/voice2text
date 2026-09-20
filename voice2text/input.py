@@ -3,8 +3,8 @@
 设计（docs/overview.md「可编辑检测为什么用 UIAutomation」「为什么不用剪贴板」）：
 - uiautomation 取焦点控件，ControlType ∈ {Edit, Document} 或 ValuePattern 可写 → 可输入
 - 开始时锁定窗口/控件；已知终端允许原生焦点检测，其他 UIA 异常停止输入
-- 默认用 SendInput Unicode 注入直接上屏（不经剪贴板，不污染剪贴板历史）；
-  个别不认 VK_PACKET 的应用可用 config.input_clipboard=true 回退剪贴板粘贴路径
+- 默认用 SendInput Unicode 注入直接上屏；微信 Qt 输入框和显式兜底模式使用
+  带历史/云同步排除标记、完成后恢复原内容的临时剪贴板事务
 - 记账：_current 跟踪当前句已上屏 partial；刷新只替换最长公共前缀之后的变化尾部
 """
 
@@ -16,9 +16,9 @@ import time
 from time import perf_counter_ns
 
 import keyboard  # type: ignore[import-untyped]  # 仅剪贴板兜底路径使用
-import pyperclip  # type: ignore[import-untyped]  # 同上
 
 from voice2text import keysender
+from voice2text.clipboard_tx import temporary_text
 from voice2text.target import InputTarget
 from voice2text.diagnostics import trace
 
@@ -26,6 +26,7 @@ _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
 _INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
 _BUFFERED_INPUT_APPS = {"weixin"}
+_CLIPBOARD_INPUT_APPS = {"weixin"}
 
 
 def _semantic_tail(text: str) -> str:
@@ -343,9 +344,15 @@ class TextInserter:
     def _insert_text(self, text: str) -> None:
         self._check_batch()
         if self._use_clipboard:
-            # 剪贴板兜底路径：键间必须留间隔——IME 的异步键盘钩子可能把零间隔
-            # 连发的 Ctrl 和 v 拆散，落单的 v 进入拼音组合框（实测 bug）。
-            pyperclip.copy(text)
+            self._paste_text(text)
+        else:
+            keysender.send_text(text, guard=self._check_batch)
+
+    def _paste_text(self, text: str) -> None:
+        """以不进入 Win+V/云同步的临时剪贴板事务粘贴，并恢复原始全部格式。"""
+        self._check_batch()
+        with temporary_text(text):
+            # 键间必须留间隔：IME 的异步钩子可能把零间隔 Ctrl+V 拆散。
             keyboard.release("ctrl")
             time.sleep(0.01)
             self._check_batch()
@@ -354,16 +361,15 @@ class TextInserter:
                 time.sleep(0.02)
                 self._check_batch()
                 keyboard.press_and_release("v")
-                time.sleep(0.02)
+                time.sleep(0.12)
             finally:
                 keyboard.release("ctrl")
-        else:
-            keysender.send_text(text, guard=self._check_batch)
 
     def _insert_buffered_text(self, text: str) -> None:
+        use_clipboard = self._use_clipboard or self._target_process() in _CLIPBOARD_INPUT_APPS
         trace("injection", process=self._target_process(), text=text,
-              transport="clipboard" if self._use_clipboard else "unicode_slow")
-        if self._use_clipboard:
-            self._insert_text(text)
+              transport="protected_clipboard" if use_clipboard else "unicode_slow")
+        if use_clipboard:
+            self._paste_text(text)
         else:
             keysender.send_text_slow(text, guard=self._check_batch)

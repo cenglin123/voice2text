@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from voice2text import target, keysender
+from voice2text import target, keysender, clipboard_tx
 from voice2text.input import TextInserter
 from voice2text.desktop import RuntimeOutput, SingleInstance
 from voice2text.tray import build_tray, toggle_label
@@ -55,6 +55,13 @@ class SessionTests(unittest.TestCase):
         self.send_key_presses = self.enterContext(
             patch.object(keysender, "send_key_presses", side_effect=navigate)
         )
+        self.paste_text = self.enterContext(
+            patch.object(
+                self.inserter,
+                "_paste_text",
+                side_effect=lambda value: text(value, self.inserter._check_batch),
+            )
+        )
 
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
@@ -93,9 +100,8 @@ class SessionTests(unittest.TestCase):
         self.send_backspaces.assert_not_called()
         self.send_key_presses.assert_not_called()
         self.send_text.assert_not_called()
-        self.send_text_slow.assert_called_once_with(
-            punctuated, guard=self.inserter._check_batch
-        )
+        self.paste_text.assert_called_once_with(punctuated)
+        self.send_text_slow.assert_not_called()
 
     def test_weixin_rejects_destructive_proofread_replacement(self):
         self.destination.process = "weixin"
@@ -310,6 +316,26 @@ class TargetTests(unittest.TestCase):
             self.assertTrue(dest.valid())
             self.assertTrue(dest.focused())
 
+    def test_wps_accepts_captured_editor_hosted_by_companion_process(self):
+        identities = {
+            123: (45, 999999),
+            124: (46, 888888),
+        }
+        with patch.object(target, "foreground", return_value=123), \
+             patch.object(target, "_identity", side_effect=lambda hwnd: identities.get(hwnd, (0, 0))), \
+             patch.object(target, "_process_name", return_value="wps"), \
+             patch.object(target, "_focus", return_value=124), \
+             patch.object(target, "_class", return_value="OpusApp"), \
+             patch.object(target.auto, "GetFocusedControl", return_value=None):
+            dest = target.InputTarget.capture(set())
+        self.assertEqual((dest.focus_tid, dest.focus_pid), (46, 888888))
+        with patch.object(target, "foreground", return_value=123), \
+             patch.object(target, "_focus", return_value=124), \
+             patch.object(target, "_identity", side_effect=lambda hwnd: identities.get(hwnd, (0, 0))), \
+             patch.object(target._user, "IsWindow", return_value=True):
+            self.assertTrue(dest.focused())
+            self.assertTrue(dest.restore())
+
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()
         with patch.object(target.InputTarget, "focused", return_value=False), \
@@ -493,6 +519,36 @@ class PerformanceTests(unittest.TestCase):
         self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
+    def test_protected_clipboard_marks_temporary_text_private_and_restores(self):
+        original = Mock()
+        formats = {}
+        with patch.object(clipboard_tx.pythoncom, "CoInitialize"), \
+             patch.object(clipboard_tx.pythoncom, "CoUninitialize"), \
+             patch.object(clipboard_tx.pythoncom, "OleGetClipboard", return_value=original), \
+             patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore, \
+             patch.object(clipboard_tx.pythoncom, "OleFlushClipboard") as flush, \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "EmptyClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "SetClipboardText"), \
+             patch.object(
+                 clipboard_tx.win32clipboard,
+                 "RegisterClipboardFormat",
+                 side_effect=lambda name: formats.setdefault(name, len(formats) + 100),
+             ), \
+             patch.object(clipboard_tx.win32clipboard, "SetClipboardData") as set_data, \
+             patch.object(
+                 clipboard_tx.win32clipboard,
+                 "GetClipboardSequenceNumber",
+                 side_effect=[7, 7],
+             ):
+            with clipboard_tx.temporary_text("测试"):
+                pass
+        self.assertEqual(set(formats), set(clipboard_tx._PRIVACY_FORMATS))
+        self.assertEqual(set_data.call_count, len(clipboard_tx._PRIVACY_FORMATS))
+        restore.assert_called_once_with(original)
+        flush.assert_called_once()
+
     def test_hotkey_toggles_only_after_combo_release(self):
         with patch("voice2text.hotkey.keyboard.add_hotkey", return_value="hook") as add:
             listener = HotkeyListener("alt+v")

@@ -6,7 +6,7 @@ status: investigating
 severity: high
 liveness: active
 last_confirmed: 2026-09-20
-confirmed_count: 5
+confirmed_count: 6
 tags: [微信, Weixin, UIA, RuntimeId, 标点, 上屏]
 related_files: [voice2text/target.py, voice2text/asr.py, voice2text/input.py, voice2text/keysender.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -27,6 +27,8 @@ evidence:
     ref: "无损光标插入版真机仍输出‘锄禾日当午。。滴禾下土。。知盘中餐？？利决心。’"
   - type: user_quote
     ref: "句末追加版真机输出‘锄禾日当午汗滴禾下土谁知盘中餐？？粒皆辛苦。’"
+  - type: error_log
+    ref: "诊断显示 punctuation/projected/injection 文本均正确，但微信屏幕仍出现重复标点和丢字"
 created_at: 2026-09-20
 updated_at: 2026-09-20
 ---
@@ -50,12 +52,10 @@ updated_at: 2026-09-20
 
 ## 原因是什么
 
-根因尚未确认。此前关于富文本吞字、组合区覆盖、跨线程焦点和 HWND 重建的说法均为假设，
-没有真实事件或句柄快照支持，不能当作已确认事实。多轮模拟回归通过后，用户真机仍复现。
-外部同类项目的实现指出部分 Electron/Chromium 编辑器会丢弃持续时间为零的 Unicode 按键，
-而本项目此前的慢速路径虽然按字符分批，却仍在同一次 `SendInput` 中发送按下和抬起。这个差异
-与现象吻合，但必须经真机验证后才能确认为根因。新增显式启用的阶段文本与焦点诊断，并使用
-固定文本探针隔离模型和输入链路。
+显式诊断已确认 ASR endpoint、标点模型、字符投影和注入层收到的整句文本完全正确；相同会话
+在微信 `Qt51514QWindowIcon` 输入框屏幕上仍出现重复标点与丢字。因此故障位于微信接收
+`VK_PACKET` 的外部输入边界，不在识别或标点恢复。增加真实按键保持时间后仍复现，说明继续
+调整 Unicode 事件节奏不能解决这个 Qt 输入框兼容问题。
 
 ## 怎么修复的
 
@@ -75,13 +75,16 @@ updated_at: 2026-09-20
    其他已验证编辑器仍保留逐字实时刷新和句中标点。
 8. 慢速路径把每个 UTF-16 码元的按下与抬起拆成两次系统调用，默认保持按下 10ms，并在码元间
    等待 20ms；这轮调整来自公开项目的已验证兼容策略，当前仍标记为待真机确认。
+9. 微信端点整句不再走 `VK_PACKET`，改用受保护剪贴板事务粘贴。临时文本声明禁止进入剪贴板
+   历史和云同步；粘贴完成后仅当剪贴板序号仍属于本事务时恢复原始 IDataObject，避免覆盖用户
+   同时复制的新内容。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 54 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
-句首/重复标点，以及微信端点缓冲模式在 partial 阶段零写入、endpoint 仅一次慢速整句写入、
-校对阶段零覆盖；新增检查确认慢速路径的按下和抬起分离。尚未在真实微信客户端完成本轮
-真实按键时长方案的手工冒烟。
+`python scripts/check_session.py` 通过 56 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
+句首/重复标点，以及微信端点缓冲模式在 partial 阶段零写入、endpoint 仅一次整句粘贴、
+校对阶段零覆盖；新增检查确认微信改用受保护剪贴板、隐私格式完整发布并恢复原 IDataObject。
+尚未在真实微信客户端完成本轮剪贴板事务的手工冒烟。
 
 ## 风险和后续
 
@@ -96,3 +99,4 @@ updated_at: 2026-09-20
 - 待提交：微信禁用回溯式编辑，仅追加句末符号并拒绝校对覆盖。
 - 待提交：微信改为 partial 内存缓冲、endpoint 慢速整句写入。
 - 待提交：慢速 Unicode 注入增加真实按键保持时间和字符间隔。
+- 待提交：微信 Qt 输入框改用受保护剪贴板事务。

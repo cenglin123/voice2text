@@ -102,6 +102,8 @@ class InputTarget:
     runtime_id: tuple[int, ...]
     terminal: bool
     process: str
+    focus_tid: int = 0
+    focus_pid: int = 0
 
     @classmethod
     def capture(cls, blacklist: set[str]) -> "InputTarget":
@@ -116,6 +118,7 @@ class InputTarget:
         focus = _focus(tid)
         if not focus:
             raise RuntimeError("无法确定目标输入控件")
+        focus_tid, focus_pid = _identity(focus)
         window_class = _class(hwnd)
         terminal = window_class in _TERMINALS
         native_focus = terminal or process in _NATIVE_FOCUS_APPS
@@ -150,7 +153,8 @@ class InputTarget:
             runtime_id = ()
         if foreground() != hwnd or _focus(tid) != focus:
             raise RuntimeError("开始时焦点发生变化，请重新开始")
-        return cls(hwnd, pid, tid, focus, runtime_id, terminal, process)
+        return cls(hwnd, pid, tid, focus, runtime_id, terminal, process,
+                   focus_tid=focus_tid, focus_pid=focus_pid)
 
     def valid(self) -> bool:
         window_valid = bool(_user.IsWindow(self.hwnd) and _identity(self.hwnd) == (self.tid, self.pid))
@@ -169,7 +173,8 @@ class InputTarget:
         def describe(hwnd):
             return dict(hwnd=hwnd, exists=bool(_user.IsWindow(hwnd)),
                         identity=_identity(hwnd), window_class=_class(hwnd))
-        return dict(captured_pid=self.pid, captured_tid=self.tid, process=self.process,
+        return dict(captured_pid=self.pid, captured_tid=self.tid,
+                    focus_pid=self.focus_pid, focus_tid=self.focus_tid, process=self.process,
                     captured=describe(self.hwnd), captured_focus=describe(self.focus_hwnd),
                     foreground=describe(fg), thread_focus=describe(_focus(self.tid)),
                     foreground_focus=describe(_focus(0)))
@@ -185,7 +190,10 @@ class InputTarget:
             if not foreground_hwnd or _identity(foreground_hwnd)[1] != self.pid:
                 return False
             current_focus = _focus(0)
-            return not current_focus or _identity(current_focus)[1] == self.pid
+            allowed_pids = {self.pid}
+            if self.focus_pid:
+                allowed_pids.add(self.focus_pid)
+            return not current_focus or _identity(current_focus)[1] in allowed_pids
         if foreground_hwnd != self.hwnd:
             return False
         # WPS 的单元格进入/退出编辑态时，焦点可能转移到同进程的另一 GUI 线程；

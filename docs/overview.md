@@ -43,10 +43,11 @@ Alt+V（keyboard 全局热键，常驻后台）
 - **选择**：Qwen3-1.7B Q4_K_M GGUF（约 1.1GB）。注意：PyPI 上 llama-cpp-python 只发布 sdist，Windows wheel 在作者索引 `https://abetlen.github.io/llama-cpp-python/whl/cpu/`，安装命令须带 `--extra-index-url`，发行包随包携带 wheel
 - **取舍**：校对质量低于 7B 级模型；做成配置项可换更大模型（如 Qwen3-4B）。10 秒只标记慢校对，结果仍应用；单块超过 30 秒会关闭该输入会话并释放焦点，迟到结果由会话代数拦截。
 
-### 上屏为什么用 SendInput Unicode 注入而不是剪贴板
+### 上屏为什么默认用 SendInput Unicode 注入
 - 初版方案是剪贴板 + Ctrl+V（规避输入法对普通键击的转义），但 Windows 剪贴板历史（Win+V）会积累每一次 partial 刷新的文本（用户实测不可接受），且与用户剪贴板存在保存/恢复竞态
 - 现方案：SendInput KEYEVENTF_UNICODE（VK_PACKET）把字符作为键盘事件直发光标处，绕过输入法组合、不经剪贴板；KeePass 等自动输入工具的标准做法
-- 兜底：个别不认 VK_PACKET 的应用用 `config.input_clipboard=true` 回退剪贴板路径（该路径键间需留间隔，防 IME 异步钩子把 Ctrl+V 拆散）
+- 微信 Qt 输入框会错误接收 VK_PACKET，端点整句改用受保护剪贴板事务：临时内容声明不进入 Win+V/云同步，粘贴后仅在剪贴板序号未变化时恢复原始全部格式；用户同时复制的新内容优先保留
+- 兜底：其他不认 VK_PACKET 的应用可用 `config.input_clipboard=true` 使用同一受保护剪贴板路径（Ctrl+V 键间留有间隔，防 IME 异步钩子拆散组合键）
 
 ### 可编辑检测为什么用 UIAutomation
 - pyautogui/pyperclip 没有 UI 元素内省能力，判断不了"光标是否在可编辑控件"
