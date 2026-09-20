@@ -135,13 +135,15 @@ class ASRSessionWorker(threading.Thread):
     def _deliver_sentence(self, text: str) -> None:
         """原文成功同步后，才以只加标点的版本锁句。
 
-        最终解码会修正流式 partial。若该原文无法安全写回目标输入框，继续
-        应用标点版本可能以错误基线退格并覆盖用户可见文字，因此整句放弃。
-        兼容旧回调：只有显式 ``False`` 才视为同步失败。
+        endpoint 最终解码只允许在最后一个已显示 partial 后追加内容；若它删除
+        或替换已有字符，则沿用屏幕上的 partial，避免锁句时回退已显示文字。
+        若原文无法安全写回目标输入框，整句标点和提交均放弃。
         """
-        if self._on_partial(text) is False:
+        displayed = self._last_partial
+        stable_text = text if not displayed or text.startswith(displayed) else displayed
+        if self._on_partial(stable_text) is False:
             return
-        self._on_sentence(self._restore_punctuation(text))
+        self._on_sentence(self._restore_punctuation(stable_text))
 
     def _restore_punctuation(self, text: str) -> str:
         if self._punctuator is None:

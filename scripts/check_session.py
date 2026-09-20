@@ -199,6 +199,14 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(dest.runtime_id, ())
         self.assertFalse(dest.terminal)
 
+    def test_wps_apps_allow_stable_native_focus_when_uia_is_custom_drawn(self):
+        for process in ("wps", "et", "wpp"):
+            with self.subTest(process=process):
+                dest = self.capture(terminal=False, control=None, process=process,
+                                    window_class="WPSMainWindow")
+                self.assertEqual(dest.runtime_id, ())
+                self.assertFalse(dest.terminal)
+
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()
         with patch.object(target.InputTarget, "focused", return_value=False), \
@@ -275,6 +283,14 @@ class PunctuationTests(unittest.TestCase):
         self.assertEqual(result, "version 1.2 is ready。")
         self.assertEqual(outcome, "applied")
 
+    def test_rejects_leading_or_duplicate_inserted_punctuation(self):
+        original = "锄禾日当午汗滴禾下土"
+        for unsafe in ("？锄禾日当午，汗滴禾下土。", "锄禾日当午，，汗滴禾下土。"):
+            with self.subTest(unsafe=unsafe):
+                result, outcome = self.restorer(unsafe).restore(original)
+                self.assertEqual(result, original)
+                self.assertEqual(outcome, "unsafe_change")
+
     def test_worker_records_punctuation_latency_and_result(self):
         punctuator = Mock()
         punctuator.restore.return_value = ("测试。", "applied")
@@ -317,6 +333,24 @@ class PunctuationTests(unittest.TestCase):
         result, outcome = self.restorer(rewritten).restore(original)
         self.assertEqual(result, original)
         self.assertEqual(outcome, "unsafe_change")
+
+    def test_endpoint_final_cannot_replace_or_delete_last_displayed_partial(self):
+        events = []
+        original = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
+        lossy_final = "禾日当午滴禾下土知盘中餐粒皆辛苦"
+        punctuator = self.restorer("锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。")
+        worker = ASRSessionWorker(
+            Mock(), Mock(), 16000,
+            lambda text: events.append(("partial", text)),
+            lambda text: events.append(("sentence", text)),
+            punctuator,
+        )
+        worker._last_partial = original
+        worker._deliver_sentence(lossy_final)
+        self.assertEqual(events, [
+            ("partial", original),
+            ("sentence", "锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。"),
+        ])
 
 
 class PerformanceTests(unittest.TestCase):

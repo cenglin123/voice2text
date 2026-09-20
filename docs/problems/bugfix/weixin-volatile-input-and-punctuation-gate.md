@@ -6,7 +6,7 @@ status: mitigated
 severity: high
 liveness: active
 last_confirmed: 2026-09-20
-confirmed_count: 1
+confirmed_count: 2
 tags: [微信, Weixin, UIA, RuntimeId, 标点, 上屏]
 related_files: [voice2text/target.py, voice2text/asr.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -19,6 +19,8 @@ evidence:
     ref: "有时候能识别 weixin 有时候识别不到；添加标点时会把文字变成‘。禾日当午，，地禾下土…’"
   - type: conversation_context
     ref: "目标锁定对普通 UIA 控件持续比较 RuntimeId；微信 Chrome WebView 的动态节点与 ChatGPT 桌面端同类"
+  - type: user_quote
+    ref: "真机 v0.1.1 仍输出‘？禾日当午，，滴禾下土，，知盘中餐，，粒皆辛苦。’，日志 punctuation_restore=applied"
 created_at: 2026-09-20
 updated_at: 2026-09-20
 ---
@@ -45,9 +47,9 @@ updated_at: 2026-09-20
 已确认：目标锁定将微信按普通 UIA 控件处理并持续比较 RuntimeId；微信的
 `Chrome_WidgetWin_1` 富文本输入区会在更新期间重建 UIA 节点，RuntimeId 不稳定。
 
-已确认：锁句流程未将“最终 ASR 原文写入成功”作为标点和提交的前置条件。上屏状态无法
-确认时继续使用标点版本，会在错误的屏幕基线执行尾部替换。用户示例中的模型改写本身已被
-字符一致性投影拒绝；本次进一步阻断其在原文未同步时抵达输入层的路径。
+已确认：endpoint 的最终 ASR 解码可能删除或替换最后一个已显示 partial 的字符。旧门禁仅
+验证标点模型没有改写这个已经变化的最终文本，因此仍会记录 `punctuation_restore=applied`，
+随后把相对屏幕 partial 已经丢字的文本写回。字符一致性必须同时约束最终 ASR 与屏幕基线。
 
 ## 怎么修复的
 
@@ -57,19 +59,21 @@ updated_at: 2026-09-20
 2. 让部分上屏回调显式返回写入结果。最终锁句原文返回失败时，ASR 工作线程不调用标点和
    提交回调；锁句回调也只在标点文本成功写入后才提交记账。
 3. 加入微信目标身份、原文同步失败不触发标点、以及用户提供的汉字改写样本回归测试。
+4. endpoint 锁句只接受在最后一个已显示 partial 后追加的最终文本；若最终解码删除或替换
+   已显示字符，则使用屏幕 partial 作为标点输入和提交基线。
+5. 句首标点或同一字符边界出现多个新增标点时，将整个标点结果判为不安全并保留原文。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 40 项测试，其中包含微信动态 UIA 模拟和标点事务
-门禁。尚未在真实微信客户端完成本轮手工冒烟，发行前应在微信输入框完成一次开始、停顿锁句、
-停止和校对的端到端验证。
+`python scripts/check_session.py` 通过 45 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
+句首/重复标点和标点事务门禁。尚未在真实微信客户端完成本轮修复后的手工冒烟。
 
 ## 风险和后续
 
 - 微信客户端若改变顶层窗口类名，仍会在开始时安全拒绝，不会向未验证控件盲写。
-- 最终 ASR 解码自身可能修正流式 partial 的文字；这属于识别结果变化，不是标点层改写，
-  后续可通过真实样本评估是否需要调整 endpoint 策略。
+- 锁句不再采用最终 ASR 对已显示字符的修正，安全性优先于 endpoint 最终假设的少量精度收益。
 
 ## 变更历史
 
 - 待提交：增加微信动态 UIA 身份和锁句原文同步门禁。
+- 待提交：以最后显示 partial 为不可回退基线，并拒绝句首或重复新增标点。

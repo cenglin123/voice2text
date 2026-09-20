@@ -22,6 +22,10 @@ def _project_punctuation(original: str, result: str) -> str | None:
         if source_index < len(required) and char == required[source_index]:
             source_index += 1
         elif _PUNCTUATION.fullmatch(char):
+            # 句首标点和同一字符边界的连续标点通常是模型错位；宁可保留无标点
+            # 原文，也不能把“？…”或“，，”写入用户正在编辑的文本。
+            if source_index == 0 or source_index in additions:
+                return None
             additions.setdefault(source_index, []).append(char)
         else:
             return None

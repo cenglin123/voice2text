@@ -46,6 +46,7 @@ _kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, 
 _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
+_NATIVE_FOCUS_APPS = {"wps", "et", "wpp"}
 # Chromium/WebView 输入框会在页面更新时重建 UIA 节点，RuntimeId 不能作为
 # 会话期间的稳定身份。开始时仍必须通过 UIA 可编辑校验；之后锁原生窗口和
 # 焦点 HWND，并由 InputActivityGuard 监测用户主动切换。
@@ -117,19 +118,20 @@ class InputTarget:
             raise RuntimeError("无法确定目标输入控件")
         window_class = _class(hwnd)
         terminal = window_class in _TERMINALS
+        native_focus = terminal or process in _NATIVE_FOCUS_APPS
         volatile_uia = (process, window_class) in _VOLATILE_UIA
         runtime_id = ()
         try:
             ctrl = auto.GetFocusedControl()
             if ctrl is None:
-                if not terminal:
+                if not native_focus:
                     raise RuntimeError("无法读取目标输入控件")
             else:
                 runtime_id = tuple(ctrl.GetRuntimeId() or ())
-                if terminal:
-                    # TUI 会随每帧重绘更换 UIA 元素；终端只锁定稳定的原生窗口/焦点身份。
+                if native_focus:
+                    # TUI 和 WPS 编辑区使用动态/自绘控件，UIA 身份不可作为稳定依据。
                     runtime_id = ()
-            if not terminal:
+            if not native_focus:
                 editable = ctrl.ControlTypeName in {"EditControl", "DocumentControl"}
                 value = ctrl.GetValuePattern()
                 if value is not None:
@@ -143,8 +145,9 @@ class InputTarget:
                 if volatile_uia:
                     runtime_id = ()
         except Exception as exc:
-            if not terminal:
+            if not native_focus:
                 raise RuntimeError("无法验证目标输入控件，听写未开始") from exc
+            runtime_id = ()
         if foreground() != hwnd or _focus(tid) != focus:
             raise RuntimeError("开始时焦点发生变化，请重新开始")
         return cls(hwnd, pid, tid, focus, runtime_id, terminal, process)
