@@ -24,6 +24,7 @@ from voice2text.hotkey import HotkeyListener
 class SessionTests(unittest.TestCase):
     def setUp(self):
         self.destination = Mock()
+        self.destination.process = "notepad"
         self.destination.restore.return_value = True
         self.destination.focused.return_value = True
         self.inserter = TextInserter()
@@ -73,6 +74,30 @@ class SessionTests(unittest.TestCase):
             [call.args[0] for call in self.send_text.call_args_list],
             ["。", "，", "，", "，"],
         )
+
+    def test_weixin_endpoint_only_appends_terminal_punctuation(self):
+        self.destination.process = "weixin"
+        raw = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
+        punctuated = "锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。"
+        self.assertTrue(self.inserter.replace_current(raw))
+        self.send_text.reset_mock()
+        self.send_backspaces.reset_mock()
+        self.send_key_presses.reset_mock()
+        committed = self.inserter.punctuate_and_commit_current(punctuated)
+        self.assertEqual(committed, raw + "。")
+        self.assertEqual(self.screen, raw + "。")
+        self.send_backspaces.assert_not_called()
+        self.send_key_presses.assert_not_called()
+        self.send_text.assert_called_once_with("。", guard=self.inserter._check_batch)
+
+    def test_weixin_rejects_destructive_proofread_replacement(self):
+        self.destination.process = "weixin"
+        self.inserter.replace_current("原始文字。")
+        self.inserter.commit_current()
+        self.send_backspaces.reset_mock()
+        self.assertFalse(self.inserter.replace_committed_range(0, 0, "修改文字。"))
+        self.assertEqual(self.screen, "原始文字。")
+        self.send_backspaces.assert_not_called()
 
     def test_proofread_punctuation_only_preserves_following_text(self):
         for value in ("第一句", "第二句"):
@@ -250,7 +275,7 @@ class TargetTests(unittest.TestCase):
         dest = self.capture(terminal=False, control=None, process="wps",
                             window_class="WPSMainWindow")
         with patch.object(target, "foreground", return_value=dest.hwnd), \
-             patch.object(target, "_focus", return_value=777), \
+             patch.object(target, "_focus", side_effect=lambda tid: 777 if tid == 0 else 0), \
              patch.object(target, "_identity", side_effect=lambda hwnd: (
                  (dest.tid, dest.pid) if hwnd in (dest.hwnd, 777) else (0, 0)
              )), patch.object(target._user, "IsWindow", return_value=True):

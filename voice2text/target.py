@@ -163,7 +163,9 @@ class InputTarget:
         """每批输入检查原生焦点；每次事务另核对 UIA 控件身份。"""
         if not self.valid() or foreground() != self.hwnd:
             return False
-        current_focus = _focus(self.tid)
+        # WPS 的单元格进入/退出编辑态时，焦点可能转移到同进程的另一 GUI 线程；
+        # GetGUIThreadInfo(0) 返回当前前台线程队列的真实焦点。
+        current_focus = _focus(0) if self.process in _NATIVE_FOCUS_APPS else _focus(self.tid)
         if self.process in _NATIVE_FOCUS_APPS:
             return bool(current_focus and _identity(current_focus)[1] == self.pid)
         if current_focus != self.focus_hwnd:

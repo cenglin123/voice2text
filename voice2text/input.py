@@ -24,6 +24,8 @@ from voice2text.target import InputTarget
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
 _INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
+_TERMINAL_PUNCTUATION = re.compile(r"[。？！.!?]")
+_UNSAFE_CARET_NAVIGATION_APPS = {"weixin"}
 
 
 def _semantic_tail(text: str) -> str:
@@ -198,6 +200,18 @@ class TextInserter:
             prefix = " " if _ASCII_WORD_TAIL.match(self._last_committed_tail or " ") else ""
             target = prefix + text
             if target != self._current:
+                if self._target_process() in _UNSAFE_CARET_NAVIGATION_APPS:
+                    terminal = target[-1:] if _TERMINAL_PUNCTUATION.fullmatch(target[-1:]) else ""
+                    if terminal and not _TERMINAL_PUNCTUATION.search(self._current[-1:]):
+                        try:
+                            self._insert_text(terminal)
+                        except Exception as exc:  # noqa: BLE001
+                            self._session_open = False
+                            self.aborted = True
+                            self.abort_reason = f"句末标点写入失败，已停止上屏：{exc}"
+                            return ""
+                        self._current += terminal
+                    return self.commit_current()
                 additions = self._punctuation_insertions(self._current, target)
                 if additions is None or not self.is_editable_focused():
                     return ""
@@ -238,6 +252,8 @@ class TextInserter:
             prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
             old_text = "".join(old_span)
+            if self._target_process() in _UNSAFE_CARET_NAVIGATION_APPS:
+                return False
             additions = self._punctuation_insertions(old_text, replacement)
             if additions is not None:
                 try:
@@ -267,6 +283,9 @@ class TextInserter:
             if is_last:
                 self._last_committed_tail = _semantic_tail(replacement)
             return True
+
+    def _target_process(self) -> str:
+        return self._norm_process(self._target.process) if self._target is not None else ""
 
     @staticmethod
     def _punctuation_insertions(source: str, target: str) -> list[tuple[int, str]] | None:
