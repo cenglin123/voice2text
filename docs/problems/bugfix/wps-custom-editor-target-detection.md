@@ -6,7 +6,7 @@ status: mitigated
 severity: high
 liveness: active
 last_confirmed: 2026-09-20
-confirmed_count: 1
+confirmed_count: 2
 tags: [WPS, UIA, input-target, native-focus]
 related_files: [voice2text/target.py, scripts/check_session.py]
 verification:
@@ -19,6 +19,8 @@ evidence:
     ref: "WPS 中依然无法识别；连续输出‘无法验证目标输入控件，听写未开始’"
   - type: error_log
     ref: "[听写未开始] 无法验证目标输入控件，听写未开始"
+  - type: user_quote
+    ref: "WPS Excel 单元格显示‘目标锁定 wps’，但悬浮窗仍是待命中"
 created_at: 2026-09-20
 updated_at: 2026-09-20
 ---
@@ -28,6 +30,8 @@ updated_at: 2026-09-20
 ## 现在的行为
 
 光标位于 WPS 文档编辑区时按 Alt+V，目标捕获在 UIA 验证阶段失败，听写不会开始。
+表格单元格场景即使已输出“目标锁定”，Alt 释放或单元格进入编辑态时焦点子窗口仍可能变化，
+启动线程会静默放弃会话，悬浮窗回到待命。
 
 ## 预期的行为
 
@@ -44,16 +48,23 @@ WPS 文字、表格和演示的自绘编辑区应能以稳定原生窗口焦点�
 ValuePattern。WPS 的文档画布使用自绘控件，无法稳定提供这组标准 UIA 属性，但已有原生前台
 窗口、进程、线程和焦点 HWND 可用于会话锁定。
 
+WPS 表格的焦点 HWND 会在同一 WPS 顶层窗口和进程内切换。旧兜底仍把捕获瞬间的焦点 HWND
+当成不可变化的身份，因此目标捕获成功后，录音启动前的再次检查仍可能失败。
+
 ## 怎么修复的
 
 仅对 WPS 套件进程 `wps`、`et`、`wpp` 启用原生焦点兜底：开始时仍验证前台窗口、进程、线程
 和焦点 HWND，后续每批输入继续核对这些身份并受物理输入活动守卫保护。其他应用继续执行严格
 UIA 可编辑验证。
 
+会话期间允许 WPS 在同一锁定顶层窗口、同一进程内切换焦点子窗口；前台窗口或进程变化仍会
+关闸。目标锁定后悬浮窗立即进入准备状态，启动复查失败则明确输出原因并显示错误状态。
+
 ## 验证结果
 
-`python scripts/check_session.py` 通过 45 项测试；回归覆盖三个 WPS 进程在 UIA 不返回控件时
-仍能捕获稳定原生焦点，以及未知应用同样情况仍被拒绝。真实 WPS 文档需用新包复验。
+`python scripts/check_session.py` 通过 48 项测试；回归覆盖三个 WPS 进程在 UIA 不返回控件时
+仍能捕获目标、单元格编辑器焦点 HWND 在同进程切换后仍有效，以及未知应用同样情况仍被拒绝。
+`python scripts/check_all.py --quiet` 通过。真实 WPS 表格需用当前源码复验。
 
 ## 风险和后续
 
@@ -63,3 +74,4 @@ UIA 文本模式，可恢复更细粒度的控件身份检查。
 ## 变更历史
 
 - 待提交：增加 WPS 套件原生焦点兜底与回归测试。
+- 待提交：允许 WPS 同进程焦点子窗口切换，并补齐启动状态反馈。

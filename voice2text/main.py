@@ -161,6 +161,7 @@ class DictationApp:
                 self._activity_guard = InputActivityGuard(self._inserter, self._cfg.hotkey)
                 self._input_session = self._inserter.begin_session(target)
                 print(f"[目标锁定] {target.process}，听写至校对完成前保持原窗口焦点")
+                self.push_state("loading")
             except Exception as exc:
                 self._busy = False
                 print(f"[听写未开始] {exc}")
@@ -204,8 +205,12 @@ class DictationApp:
             pythoncom.CoUninitialize()
 
     def _start_session(self) -> None:
-        if self._closing or not self._inserter.guard_focus():
+        if self._closing:
             return
+        if not self._inserter.guard_focus():
+            raise RuntimeError(
+                self._inserter.abort_reason or "目标输入位置在启动录音前发生变化"
+            )
         if self._asr is None:
             print("  （首次会话：加载识别模型…）")
             try:
@@ -403,12 +408,9 @@ class DictationApp:
         if gen != self._session_gen:
             return False
         started = perf_counter_ns()
-        written = self._inserter.replace_current(text)
+        committed = self._inserter.punctuate_and_commit_current(text)
         self._metrics.record("partial_write", perf_counter_ns() - started,
-                             "ok" if written else "failed")
-        if not written:
-            return False
-        committed = self._inserter.commit_current()
+                             "ok" if committed else "failed")
         if committed:
             self._locked_sentences.append(committed)
             return True

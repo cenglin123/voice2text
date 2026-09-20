@@ -19,6 +19,8 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 VK_BACK = 0x08
+VK_LEFT = 0x25
+VK_RIGHT = 0x27
 
 _GROUP_EVENTS = 16  # 每批发送的事件数
 _GROUP_DELAY_S = 0.004  # 批间间隔：给慢应用的消息循环喘息，防事件乱序被 IME 拆散
@@ -94,6 +96,15 @@ def _build_backspace_inputs(n: int) -> list[INPUT]:
     return events
 
 
+def _build_key_inputs(vk: int, n: int) -> list[INPUT]:
+    events: list[INPUT] = []
+    for _ in range(n):
+        down = INPUT(type=INPUT_KEYBOARD, u=_INPUTunion(ki=KEYBDINPUT(vk, 0, 0, 0, None)))
+        up = INPUT(type=INPUT_KEYBOARD, u=_INPUTunion(ki=KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP, 0, None)))
+        events.extend([down, up])
+    return events
+
+
 def _flush(events: list[INPUT], guard=None) -> None:
     """分批 SendInput：批内一次系统调用（原子、保序），批间留间隔。"""
     user32 = ctypes.windll.user32
@@ -121,3 +132,10 @@ def send_backspaces(n: int, guard=None) -> None:
     if n <= 0:
         return
     _flush(_build_backspace_inputs(n), guard)
+
+
+def send_key_presses(vk: int, n: int, guard=None) -> None:
+    """发送不带修饰键的导航键；用于只插入标点的无损光标移动。"""
+    if n <= 0:
+        return
+    _flush(_build_key_inputs(vk, n), guard)

@@ -29,15 +29,28 @@ class SessionTests(unittest.TestCase):
         self.inserter = TextInserter()
         self.inserter.begin_session(self.destination)
         self.screen = ""
+        self.cursor = 0
         def text(value, guard):
             guard()
-            self.screen += value
+            self.screen = self.screen[:self.cursor] + value + self.screen[self.cursor:]
+            self.cursor += len(value)
         def back(n, guard):
             guard()
             if n:
-                self.screen = self.screen[:-n]
+                start = max(0, self.cursor - n)
+                self.screen = self.screen[:start] + self.screen[self.cursor:]
+                self.cursor = start
+        def navigate(vk, n, guard):
+            guard()
+            if vk == keysender.VK_LEFT:
+                self.cursor = max(0, self.cursor - n)
+            elif vk == keysender.VK_RIGHT:
+                self.cursor = min(len(self.screen), self.cursor + n)
         self.send_text = self.enterContext(patch.object(keysender, "send_text", side_effect=text))
         self.send_backspaces = self.enterContext(patch.object(keysender, "send_backspaces", side_effect=back))
+        self.send_key_presses = self.enterContext(
+            patch.object(keysender, "send_key_presses", side_effect=navigate)
+        )
 
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
@@ -45,6 +58,30 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.inserter.replace_committed_range(0, 0, "测试。"))
         self.assertEqual(self.screen, "测试。")
         self.assertGreaterEqual(self.destination.restore.call_count, 2)
+
+    def test_endpoint_punctuation_never_deletes_or_retypes_source_text(self):
+        raw = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
+        punctuated = "锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。"
+        self.assertTrue(self.inserter.replace_current(raw))
+        self.send_text.reset_mock()
+        self.send_backspaces.reset_mock()
+        committed = self.inserter.punctuate_and_commit_current(punctuated)
+        self.assertEqual(committed, punctuated)
+        self.assertEqual(self.screen, punctuated)
+        self.send_backspaces.assert_not_called()
+        self.assertEqual(
+            [call.args[0] for call in self.send_text.call_args_list],
+            ["。", "，", "，", "，"],
+        )
+
+    def test_proofread_punctuation_only_preserves_following_text(self):
+        for value in ("第一句", "第二句"):
+            self.inserter.replace_current(value)
+            self.inserter.commit_current()
+        self.send_backspaces.reset_mock()
+        self.assertTrue(self.inserter.replace_committed_range(0, 0, "第一句。"))
+        self.assertEqual(self.screen, "第一句。第二句")
+        self.send_backspaces.assert_not_called()
 
     def test_failed_restore_closes_all_following_writes(self):
         self.inserter.replace_current("原文")
@@ -119,7 +156,9 @@ class SessionTests(unittest.TestCase):
         app._cfg.sound_cue = False
         worker = Mock()
         worker.is_alive.return_value = False
-        worker.join.side_effect = lambda **kwargs: app._on_sentence(0, "尾句")
+        worker.join.side_effect = lambda **kwargs: (
+            app._on_partial(0, "尾句"), app._on_sentence(0, "尾句")
+        )
         app._worker = worker
         app._stop_session(1)
         app._on_sentence(0, "迟到旧回调")
@@ -206,6 +245,17 @@ class TargetTests(unittest.TestCase):
                                     window_class="WPSMainWindow")
                 self.assertEqual(dest.runtime_id, ())
                 self.assertFalse(dest.terminal)
+
+    def test_wps_cell_editor_focus_may_change_inside_same_process(self):
+        dest = self.capture(terminal=False, control=None, process="wps",
+                            window_class="WPSMainWindow")
+        with patch.object(target, "foreground", return_value=dest.hwnd), \
+             patch.object(target, "_focus", return_value=777), \
+             patch.object(target, "_identity", side_effect=lambda hwnd: (
+                 (dest.tid, dest.pid) if hwnd in (dest.hwnd, 777) else (0, 0)
+             )), patch.object(target._user, "IsWindow", return_value=True):
+            self.assertTrue(dest.focused())
+            self.assertTrue(dest.restore())
 
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()

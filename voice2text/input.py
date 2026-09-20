@@ -23,6 +23,7 @@ from voice2text.target import InputTarget
 
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
+_INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
 
 
 def _semantic_tail(text: str) -> str:
@@ -189,6 +190,27 @@ class TextInserter:
             self._detached = False
             return committed
 
+    def punctuate_and_commit_current(self, text: str) -> str:
+        """只移动光标并插入新增标点，然后锁句；不删除或重打已上屏汉字。"""
+        with self._lock:
+            if not self._session_open or self._detached:
+                return ""
+            prefix = " " if _ASCII_WORD_TAIL.match(self._last_committed_tail or " ") else ""
+            target = prefix + text
+            if target != self._current:
+                additions = self._punctuation_insertions(self._current, target)
+                if additions is None or not self.is_editable_focused():
+                    return ""
+                try:
+                    self._insert_punctuation_only(len(self._current), additions, 0)
+                except Exception as exc:  # noqa: BLE001
+                    self._session_open = False
+                    self.aborted = True
+                    self.abort_reason = f"标点写入失败，已停止上屏：{exc}"
+                    return ""
+                self._current = target
+            return self.commit_current()
+
     def replace_committed_range(
         self, start: int, end: int, new_text: str, expected_generation: int | None = None
     ) -> bool:
@@ -215,6 +237,22 @@ class TextInserter:
             # 句间空格边界：校对结果不应吞并原句的前缀空格
             prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
+            old_text = "".join(old_span)
+            additions = self._punctuation_insertions(old_text, replacement)
+            if additions is not None:
+                try:
+                    self._insert_punctuation_only(
+                        len(old_text), additions, len(suffix)
+                    )
+                except Exception:  # noqa: BLE001
+                    self._session_open = False
+                    self.aborted = True
+                    return False
+                is_last = end == len(self._committed_texts) - 1
+                self._committed_texts[start : end + 1] = [replacement]
+                if is_last:
+                    self._last_committed_tail = _semantic_tail(replacement)
+                return True
             try:
                 self._delete_chars(sum(len(t) for t in old_span) + len(suffix))
                 self._insert_text(replacement + suffix)
@@ -229,6 +267,40 @@ class TextInserter:
             if is_last:
                 self._last_committed_tail = _semantic_tail(replacement)
             return True
+
+    @staticmethod
+    def _punctuation_insertions(source: str, target: str) -> list[tuple[int, str]] | None:
+        """若 target 仅在 source 中插入单个标点，返回各插入边界。"""
+        additions: list[tuple[int, str]] = []
+        source_index = 0
+        for char in target:
+            if source_index < len(source) and char == source[source_index]:
+                source_index += 1
+            elif _INSERTABLE_PUNCTUATION.fullmatch(char):
+                if source_index == 0 or (additions and additions[-1][0] == source_index):
+                    return None
+                additions.append((source_index, char))
+            else:
+                return None
+        if source_index != len(source):
+            return None
+        return additions
+
+    def _insert_punctuation_only(
+        self, source_length: int, additions: list[tuple[int, str]], trailing_chars: int
+    ) -> None:
+        """光标从整段末尾开始，自右向左插标点，最后恢复到段末。"""
+        cursor = source_length + trailing_chars
+        final_length = cursor + len(additions)
+        for boundary, punctuation in reversed(additions):
+            keysender.send_key_presses(
+                keysender.VK_LEFT, cursor - boundary, guard=self._check_batch
+            )
+            self._insert_text(punctuation)
+            cursor = boundary + 1
+        keysender.send_key_presses(
+            keysender.VK_RIGHT, final_length - cursor, guard=self._check_batch
+        )
 
     # ---- 底层写入 ----
 

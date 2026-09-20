@@ -153,13 +153,20 @@ class InputTarget:
         return cls(hwnd, pid, tid, focus, runtime_id, terminal, process)
 
     def valid(self) -> bool:
-        return bool(_user.IsWindow(self.hwnd) and _identity(self.hwnd) == (self.tid, self.pid)
-                    and _user.IsWindow(self.focus_hwnd)
+        window_valid = bool(_user.IsWindow(self.hwnd) and _identity(self.hwnd) == (self.tid, self.pid))
+        if self.process in _NATIVE_FOCUS_APPS:
+            return window_valid
+        return bool(window_valid and _user.IsWindow(self.focus_hwnd)
                     and _identity(self.focus_hwnd) == (self.tid, self.pid))
 
     def focused(self, check_control: bool = True) -> bool:
         """每批输入检查原生焦点；每次事务另核对 UIA 控件身份。"""
-        if not self.valid() or foreground() != self.hwnd or _focus(self.tid) != self.focus_hwnd:
+        if not self.valid() or foreground() != self.hwnd:
+            return False
+        current_focus = _focus(self.tid)
+        if self.process in _NATIVE_FOCUS_APPS:
+            return bool(current_focus and _identity(current_focus)[1] == self.pid)
+        if current_focus != self.focus_hwnd:
             return False
         if check_control and self.runtime_id:
             try:
