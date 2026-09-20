@@ -46,7 +46,13 @@ _kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, 
 _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
-_VOLATILE_UIA = {("chatgpt", "Chrome_WidgetWin_1")}
+# Chromium/WebView 输入框会在页面更新时重建 UIA 节点，RuntimeId 不能作为
+# 会话期间的稳定身份。开始时仍必须通过 UIA 可编辑校验；之后锁原生窗口和
+# 焦点 HWND，并由 InputActivityGuard 监测用户主动切换。
+_VOLATILE_UIA = {
+    ("chatgpt", "Chrome_WidgetWin_1"),
+    ("weixin", "Chrome_WidgetWin_1"),
+}
 
 
 def foreground() -> int:
@@ -130,9 +136,10 @@ class InputTarget:
                     editable = not value.IsReadOnly
                 if not editable or not runtime_id:
                     raise RuntimeError("当前控件不可编辑，请将光标放入输入框")
-                # ChatGPT 桌面端会在流式文本更新时重建 WebView UIA 节点，RuntimeId
-                # 随之变化，但原生焦点 HWND 保持不变。物理鼠标/键盘切换另由
-                # InputActivityGuard 立即关闸，因此会话内可安全使用稳定原生身份。
+                # ChatGPT、微信桌面端会在流式文本更新时重建 WebView UIA 节点，
+                # RuntimeId 随之变化，但原生焦点 HWND 保持不变。物理鼠标/键盘
+                # 切换另由 InputActivityGuard 立即关闸，因此会话内可安全使用
+                # 稳定原生身份。
                 if volatile_uia:
                     runtime_id = ()
         except Exception as exc:

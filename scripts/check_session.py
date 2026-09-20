@@ -189,6 +189,15 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(dest.runtime_id, ())
         self.assertFalse(dest.terminal)
 
+    def test_weixin_webview_uses_stable_native_focus_after_initial_editable_check(self):
+        ctrl = Mock(ControlTypeName="EditControl")
+        ctrl.GetRuntimeId.return_value = [1, 2]
+        ctrl.GetValuePattern.return_value = None
+        dest = self.capture(terminal=False, control=ctrl, process="weixin",
+                            window_class="Chrome_WidgetWin_1")
+        self.assertEqual(dest.runtime_id, ())
+        self.assertFalse(dest.terminal)
+
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()
         with patch.object(target.InputTarget, "focused", return_value=False), \
@@ -287,6 +296,26 @@ class PunctuationTests(unittest.TestCase):
         )
         worker._deliver_sentence("这是测试")
         self.assertEqual(events, [("partial", "这是测试"), ("sentence", "这是测试。")])
+
+    def test_worker_does_not_apply_punctuation_after_raw_sync_failure(self):
+        events = []
+        punctuator = Mock()
+        punctuator.restore.return_value = ("锄禾日当午，汗滴禾下土。", "applied")
+        worker = ASRSessionWorker(
+            Mock(), Mock(), 16000,
+            lambda text: events.append(("partial", text)) or False,
+            lambda text: events.append(("sentence", text)),
+            punctuator,
+        )
+        worker._deliver_sentence("锄禾日当午汗滴禾下土")
+        self.assertEqual(events, [("partial", "锄禾日当午汗滴禾下土")])
+
+    def test_reported_weixin_punctuation_rewrite_is_rejected(self):
+        original = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
+        rewritten = "。禾日当午，，地禾下土，，知盘中餐，，粒皆辛苦。"
+        result, outcome = self.restorer(rewritten).restore(original)
+        self.assertEqual(result, original)
+        self.assertEqual(outcome, "unsafe_change")
 
 
 class PerformanceTests(unittest.TestCase):

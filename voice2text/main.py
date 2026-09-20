@@ -390,24 +390,29 @@ class DictationApp:
 
     # ---- 识别线程回调 ----
 
-    def _on_partial(self, gen: int, text: str) -> None:
+    def _on_partial(self, gen: int, text: str) -> bool:
         if gen != self._session_gen:
-            return
+            return False
         started = perf_counter_ns()
         written = self._inserter.replace_current(text)
         self._metrics.record("partial_write", perf_counter_ns() - started,
                              "ok" if written else "failed")
+        return written
 
-    def _on_sentence(self, gen: int, text: str) -> None:
+    def _on_sentence(self, gen: int, text: str) -> bool:
         if gen != self._session_gen:
-            return
+            return False
         started = perf_counter_ns()
         written = self._inserter.replace_current(text)
         self._metrics.record("partial_write", perf_counter_ns() - started,
                              "ok" if written else "failed")
+        if not written:
+            return False
         committed = self._inserter.commit_current()
         if committed:
             self._locked_sentences.append(committed)
+            return True
+        return False
 
     # ---- UI 主线程每帧调用 ----
 

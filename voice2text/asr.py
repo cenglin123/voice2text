@@ -133,8 +133,14 @@ class ASRSessionWorker(threading.Thread):
         self._last_partial = ""
 
     def _deliver_sentence(self, text: str) -> None:
-        """先同步 ASR 原文，再以只加标点的版本锁句。"""
-        self._on_partial(text)
+        """原文成功同步后，才以只加标点的版本锁句。
+
+        最终解码会修正流式 partial。若该原文无法安全写回目标输入框，继续
+        应用标点版本可能以错误基线退格并覆盖用户可见文字，因此整句放弃。
+        兼容旧回调：只有显式 ``False`` 才视为同步失败。
+        """
+        if self._on_partial(text) is False:
+            return
         self._on_sentence(self._restore_punctuation(text))
 
     def _restore_punctuation(self, text: str) -> str:
