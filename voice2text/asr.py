@@ -16,6 +16,7 @@ import numpy as np
 import sherpa_onnx
 
 from voice2text.config import AppConfig
+from voice2text.diagnostics import trace
 
 
 class StreamingASR:
@@ -141,6 +142,7 @@ class ASRSessionWorker(threading.Thread):
         """
         displayed = self._last_partial
         stable_text = text if not displayed or text.startswith(displayed) else displayed
+        trace("asr_endpoint", partial=displayed, final=text, stable=stable_text)
         if self._on_partial(stable_text) is False:
             return
         self._on_sentence(self._restore_punctuation(stable_text))

@@ -161,6 +161,8 @@ class DictationApp:
                 self._activity_guard = InputActivityGuard(self._inserter, self._cfg.hotkey)
                 self._input_session = self._inserter.begin_session(target)
                 print(f"[目标锁定] {target.process}，听写至校对完成前保持原窗口焦点")
+                from voice2text.diagnostics import trace
+                trace("target_capture", snapshot=target.diagnostic_snapshot())
                 self.push_state("loading")
             except Exception as exc:
                 self._busy = False
@@ -503,6 +505,8 @@ class DictationApp:
 def _gui_main(output) -> int:
     cfg = load_config()
     print(f"voice2text v{__version__}  热键: {cfg.hotkey}")
+    from voice2text.diagnostics import trace, fingerprint
+    trace("build", fingerprint=fingerprint())
     ok, missing_detail = check_models(cfg)
     if not ok:
         message = f"模型未就绪：请先运行 install.bat\n{missing_detail}"

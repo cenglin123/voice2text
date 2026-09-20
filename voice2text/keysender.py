@@ -87,6 +87,18 @@ def _build_char_inputs(text: str) -> list[INPUT]:
     return events
 
 
+def _utf16_units(text: str) -> list[int]:
+    """文本拆成 SendInput 使用的 UTF-16 码元。"""
+    units: list[int] = []
+    for char in text:
+        encoded = char.encode("utf-16-le")
+        units.extend(
+            int.from_bytes(encoded[index : index + 2], "little")
+            for index in range(0, len(encoded), 2)
+        )
+    return units
+
+
 def _build_backspace_inputs(n: int) -> list[INPUT]:
     events: list[INPUT] = []
     for _ in range(n):
@@ -127,11 +139,18 @@ def send_text(text: str, guard=None) -> None:
     _flush(_build_char_inputs(text), guard)
 
 
-def send_text_slow(text: str, guard=None, interval: float = 0.008) -> None:
-    """逐字符注入，兼容会吞高速 VK_PACKET 批次的富文本编辑器。"""
-    for index, char in enumerate(text):
-        _flush(_build_char_inputs(char), guard)
-        if index + 1 < len(text):
+def send_text_slow(
+    text: str, guard=None, interval: float = 0.020, key_down_delay: float = 0.010
+) -> None:
+    """逐码元注入，并让按下与抬起之间保留真实持续时间。"""
+    units = _utf16_units(text)
+    for index, unit in enumerate(units):
+        down, up = _char_down_up(unit)
+        _flush([down], guard)
+        if key_down_delay > 0:
+            time.sleep(key_down_delay)
+        _flush([up], guard)
+        if interval > 0 and index + 1 < len(units):
             time.sleep(interval)
 
 

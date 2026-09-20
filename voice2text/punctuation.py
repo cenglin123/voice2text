@@ -7,6 +7,7 @@ import re
 import sherpa_onnx
 
 from voice2text.config import AppConfig
+from voice2text.diagnostics import trace
 
 _PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
 
@@ -65,6 +66,7 @@ class PunctuationRestorer:
         except Exception:  # noqa: BLE001 —— 标点失败不应中断识别
             return text, "error"
         projected = _project_punctuation(text, result) if result else None
+        trace("punctuation", source=text, model=result, projected=projected)
         if projected is None:
             return text, "unsafe_change"
         return projected, "applied" if projected != text else "unchanged"

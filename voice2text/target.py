@@ -163,6 +163,17 @@ class InputTarget:
         return bool(window_valid and _user.IsWindow(self.focus_hwnd)
                     and _identity(self.focus_hwnd) == (self.tid, self.pid))
 
+    def diagnostic_snapshot(self) -> dict:
+        """只读句柄快照，不读取文档内容或改变焦点。"""
+        fg = foreground()
+        def describe(hwnd):
+            return dict(hwnd=hwnd, exists=bool(_user.IsWindow(hwnd)),
+                        identity=_identity(hwnd), window_class=_class(hwnd))
+        return dict(captured_pid=self.pid, captured_tid=self.tid, process=self.process,
+                    captured=describe(self.hwnd), captured_focus=describe(self.focus_hwnd),
+                    foreground=describe(fg), thread_focus=describe(_focus(self.tid)),
+                    foreground_focus=describe(_focus(0)))
+
     def focused(self, check_control: bool = True) -> bool:
         """每批输入检查原生焦点；每次事务另核对 UIA 控件身份。"""
         if not self.valid():

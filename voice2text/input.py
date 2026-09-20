@@ -20,6 +20,7 @@ import pyperclip  # type: ignore[import-untyped]  # 同上
 
 from voice2text import keysender
 from voice2text.target import InputTarget
+from voice2text.diagnostics import trace
 
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
@@ -115,11 +116,13 @@ class TextInserter:
         try:
             restored = self._target.restore()
         except Exception:
+            trace("target_restore_exception", detail=__import__('traceback').format_exc())
             restored = False
         if self._metrics is not None:
             self._metrics.record("target_restore", perf_counter_ns() - started,
                                  "ok" if restored else "failed")
         if not restored:
+            trace("target_restore_failed", snapshot=self._target.diagnostic_snapshot())
             self.abort("原输入窗口已关闭或焦点无法安全恢复，已停止上屏")
             return False
         return True
@@ -358,6 +361,8 @@ class TextInserter:
             keysender.send_text(text, guard=self._check_batch)
 
     def _insert_buffered_text(self, text: str) -> None:
+        trace("injection", process=self._target_process(), text=text,
+              transport="clipboard" if self._use_clipboard else "unicode_slow")
         if self._use_clipboard:
             self._insert_text(text)
         else:

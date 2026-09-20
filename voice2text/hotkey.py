@@ -50,7 +50,9 @@ class HotkeyListener:
         self._last_press = threading.Event()
         # suppress=True：吞掉 Alt+V，不再透传给焦点应用。中文输入法激活时，
         # 透传的 v 会进入拼音组合框并弹出 v 模式面板（实测 bug），必须拦截。
-        self._hook = keyboard.add_hotkey(combo, self._on_hotkey, suppress=True)
+        self._hook = keyboard.add_hotkey(
+            combo, self._on_hotkey, suppress=True, trigger_on_release=True
+        )
 
     def _on_hotkey(self) -> None:
         self._last_press.set()
@@ -87,7 +89,9 @@ class HotkeyListener:
     def rebind(self, combo: str) -> None:
         """更换热键组合（设置窗口保存时调用）。失败时抛异常由调用方提示。"""
         old = self._hook
-        self._hook = keyboard.add_hotkey(combo, self._on_hotkey, suppress=True)
+        self._hook = keyboard.add_hotkey(
+            combo, self._on_hotkey, suppress=True, trigger_on_release=True
+        )
         self._combo = combo
         try:
             keyboard.remove_hotkey(old)

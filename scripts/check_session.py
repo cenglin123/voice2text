@@ -493,6 +493,26 @@ class PerformanceTests(unittest.TestCase):
         self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
+    def test_hotkey_toggles_only_after_combo_release(self):
+        with patch("voice2text.hotkey.keyboard.add_hotkey", return_value="hook") as add:
+            listener = HotkeyListener("alt+v")
+        add.assert_called_once_with(
+            "alt+v", listener._on_hotkey, suppress=True, trigger_on_release=True
+        )
+
+    def test_slow_unicode_input_holds_each_code_unit_before_keyup(self):
+        with patch.object(keysender, "_flush") as flush, \
+             patch.object(keysender.time, "sleep") as sleep:
+            keysender.send_text_slow("甲", interval=0.02, key_down_delay=0.01)
+        self.assertEqual(flush.call_count, 2)
+        down = flush.call_args_list[0].args[0][0]
+        up = flush.call_args_list[1].args[0][0]
+        self.assertEqual(down.ki.dwFlags, keysender.KEYEVENTF_UNICODE)
+        self.assertEqual(
+            up.ki.dwFlags, keysender.KEYEVENTF_UNICODE | keysender.KEYEVENTF_KEYUP
+        )
+        sleep.assert_called_once_with(0.01)
+
     def test_hotkey_clear_releases_only_latched_alt(self):
         listener = HotkeyListener.__new__(HotkeyListener)
         listener._toggle_event = __import__("threading").Event()
