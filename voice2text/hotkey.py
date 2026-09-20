@@ -8,9 +8,34 @@ keyboard 库在 Windows 普通用户权限即可安装低级键盘钩子；唯�
 
 from __future__ import annotations
 
+import ctypes
 import threading
 
 import keyboard  # type: ignore[import-untyped]
+
+_user = ctypes.WinDLL("user32", use_last_error=True)
+_VK_MENU = 0x12
+_VK_LMENU = 0xA4
+_VK_RMENU = 0xA5
+_KEYEVENTF_KEYUP = 0x0002
+
+
+def _pressed(vk: int) -> bool:
+    return bool(_user.GetAsyncKeyState(vk) & 0x8000)
+
+
+def _release_latched_alt() -> None:
+    """为 suppress 热键补齐偶发漏掉的 Alt key-up。
+
+    回调由 keyboard 的监听线程发出，而主线程最多 150ms 后才会处理切换；此时
+    正常按键已松开，本函数不产生事件。若 Windows 仍报告 Alt 被按住，则发送
+    对应 key-up，避免菜单栏/其他程序把后续键当作 Alt 组合键。
+    """
+    keys = [vk for vk in (_VK_LMENU, _VK_RMENU) if _pressed(vk)]
+    if not keys and _pressed(_VK_MENU):
+        keys = [_VK_MENU]
+    for vk in keys:
+        _user.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
 
 
 class HotkeyListener:
@@ -57,6 +82,7 @@ class HotkeyListener:
 
     def clear_toggle(self) -> None:
         self._toggle_event.clear()
+        _release_latched_alt()
 
     def rebind(self, combo: str) -> None:
         """更换热键组合（设置窗口保存时调用）。失败时抛异常由调用方提示。"""

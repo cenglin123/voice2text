@@ -18,6 +18,7 @@ from voice2text.proofread import Proofreader
 from voice2text.performance import PerformanceRecorder
 from voice2text.punctuation import PunctuationRestorer
 from voice2text.asr import ASRSessionWorker
+from voice2text.hotkey import HotkeyListener
 
 
 class SessionTests(unittest.TestCase):
@@ -355,6 +356,25 @@ class PerformanceTests(unittest.TestCase):
         self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
+    def test_hotkey_clear_releases_only_latched_alt(self):
+        listener = HotkeyListener.__new__(HotkeyListener)
+        listener._toggle_event = __import__("threading").Event()
+        listener._toggle_event.set()
+        with patch("voice2text.hotkey._pressed", side_effect=lambda vk: vk == 0xA4), \
+             patch("voice2text.hotkey._user.keybd_event") as release:
+            listener.clear_toggle()
+        self.assertFalse(listener.toggle_event.is_set())
+        release.assert_called_once_with(0xA4, 0, 0x0002, 0)
+
+    def test_hotkey_clear_does_not_inject_after_normal_alt_release(self):
+        listener = HotkeyListener.__new__(HotkeyListener)
+        listener._toggle_event = __import__("threading").Event()
+        listener._toggle_event.set()
+        with patch("voice2text.hotkey._pressed", return_value=False), \
+             patch("voice2text.hotkey._user.keybd_event") as release:
+            listener.clear_toggle()
+        release.assert_not_called()
+
     def test_hotkey_event_sequence_survives_stale_async_state(self):
         import ctypes
         from voice2text.activity import _Key
