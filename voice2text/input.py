@@ -24,8 +24,7 @@ from voice2text.target import InputTarget
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
 _INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
-_TERMINAL_PUNCTUATION = re.compile(r"[。？！.!?]")
-_UNSAFE_CARET_NAVIGATION_APPS = {"weixin"}
+_BUFFERED_INPUT_APPS = {"weixin"}
 
 
 def _semantic_tail(text: str) -> str:
@@ -156,6 +155,11 @@ class TextInserter:
                 self._detached = True
                 self._current = ""
                 return False
+            # 微信富文本框不可靠地处理退格、光标回溯和活动组合区中的标点追加。
+            # 因此 partial 只在内存更新，等 endpoint 后一次写入完整句子。
+            if self._target_process() in _BUFFERED_INPUT_APPS:
+                self._current = target
+                return True
             # sherpa partial 会修正尾部，但大部分前缀稳定。只替换分歧后的尾部，
             # 避免每 250ms 整句清空再重打造成闪烁，也显著降低长句注入延迟。
             common = 0
@@ -199,19 +203,19 @@ class TextInserter:
                 return ""
             prefix = " " if _ASCII_WORD_TAIL.match(self._last_committed_tail or " ") else ""
             target = prefix + text
+            if self._target_process() in _BUFFERED_INPUT_APPS:
+                if not self.is_editable_focused():
+                    return ""
+                try:
+                    self._insert_buffered_text(target)
+                except Exception as exc:  # noqa: BLE001
+                    self._session_open = False
+                    self.aborted = True
+                    self.abort_reason = f"整句写入失败，已停止上屏：{exc}"
+                    return ""
+                self._current = target
+                return self.commit_current()
             if target != self._current:
-                if self._target_process() in _UNSAFE_CARET_NAVIGATION_APPS:
-                    terminal = target[-1:] if _TERMINAL_PUNCTUATION.fullmatch(target[-1:]) else ""
-                    if terminal and not _TERMINAL_PUNCTUATION.search(self._current[-1:]):
-                        try:
-                            self._insert_text(terminal)
-                        except Exception as exc:  # noqa: BLE001
-                            self._session_open = False
-                            self.aborted = True
-                            self.abort_reason = f"句末标点写入失败，已停止上屏：{exc}"
-                            return ""
-                        self._current += terminal
-                    return self.commit_current()
                 additions = self._punctuation_insertions(self._current, target)
                 if additions is None or not self.is_editable_focused():
                     return ""
@@ -252,7 +256,7 @@ class TextInserter:
             prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
             old_text = "".join(old_span)
-            if self._target_process() in _UNSAFE_CARET_NAVIGATION_APPS:
+            if self._target_process() in _BUFFERED_INPUT_APPS:
                 return False
             additions = self._punctuation_insertions(old_text, replacement)
             if additions is not None:
@@ -352,3 +356,9 @@ class TextInserter:
                 keyboard.release("ctrl")
         else:
             keysender.send_text(text, guard=self._check_batch)
+
+    def _insert_buffered_text(self, text: str) -> None:
+        if self._use_clipboard:
+            self._insert_text(text)
+        else:
+            keysender.send_text_slow(text, guard=self._check_batch)

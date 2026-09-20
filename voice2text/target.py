@@ -155,19 +155,31 @@ class InputTarget:
     def valid(self) -> bool:
         window_valid = bool(_user.IsWindow(self.hwnd) and _identity(self.hwnd) == (self.tid, self.pid))
         if self.process in _NATIVE_FOCUS_APPS:
-            return window_valid
+            foreground_hwnd = foreground()
+            foreground_same_process = bool(
+                foreground_hwnd and _identity(foreground_hwnd)[1] == self.pid
+            )
+            return window_valid or foreground_same_process
         return bool(window_valid and _user.IsWindow(self.focus_hwnd)
                     and _identity(self.focus_hwnd) == (self.tid, self.pid))
 
     def focused(self, check_control: bool = True) -> bool:
         """每批输入检查原生焦点；每次事务另核对 UIA 控件身份。"""
-        if not self.valid() or foreground() != self.hwnd:
+        if not self.valid():
+            return False
+        foreground_hwnd = foreground()
+        if self.process in _NATIVE_FOCUS_APPS:
+            # WPS 在单元格进入编辑态时可能切换同进程顶层窗口和 GUI 线程；
+            # 捕获阶段已验证输入位置，后续物理操作由 InputActivityGuard 关闸。
+            if not foreground_hwnd or _identity(foreground_hwnd)[1] != self.pid:
+                return False
+            current_focus = _focus(0)
+            return not current_focus or _identity(current_focus)[1] == self.pid
+        if foreground_hwnd != self.hwnd:
             return False
         # WPS 的单元格进入/退出编辑态时，焦点可能转移到同进程的另一 GUI 线程；
         # GetGUIThreadInfo(0) 返回当前前台线程队列的真实焦点。
-        current_focus = _focus(0) if self.process in _NATIVE_FOCUS_APPS else _focus(self.tid)
-        if self.process in _NATIVE_FOCUS_APPS:
-            return bool(current_focus and _identity(current_focus)[1] == self.pid)
+        current_focus = _focus(self.tid)
         if current_focus != self.focus_hwnd:
             return False
         if check_control and self.runtime_id:

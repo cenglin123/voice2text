@@ -127,6 +127,14 @@ def send_text(text: str, guard=None) -> None:
     _flush(_build_char_inputs(text), guard)
 
 
+def send_text_slow(text: str, guard=None, interval: float = 0.008) -> None:
+    """逐字符注入，兼容会吞高速 VK_PACKET 批次的富文本编辑器。"""
+    for index, char in enumerate(text):
+        _flush(_build_char_inputs(char), guard)
+        if index + 1 < len(text):
+            time.sleep(interval)
+
+
 def send_backspaces(n: int, guard=None) -> None:
     """发送 n 个退格。"""
     if n <= 0:

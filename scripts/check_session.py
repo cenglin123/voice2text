@@ -48,6 +48,9 @@ class SessionTests(unittest.TestCase):
             elif vk == keysender.VK_RIGHT:
                 self.cursor = min(len(self.screen), self.cursor + n)
         self.send_text = self.enterContext(patch.object(keysender, "send_text", side_effect=text))
+        self.send_text_slow = self.enterContext(
+            patch.object(keysender, "send_text_slow", side_effect=text)
+        )
         self.send_backspaces = self.enterContext(patch.object(keysender, "send_backspaces", side_effect=back))
         self.send_key_presses = self.enterContext(
             patch.object(keysender, "send_key_presses", side_effect=navigate)
@@ -75,25 +78,29 @@ class SessionTests(unittest.TestCase):
             ["。", "，", "，", "，"],
         )
 
-    def test_weixin_endpoint_only_appends_terminal_punctuation(self):
+    def test_weixin_buffers_partial_then_writes_punctuated_sentence_once(self):
         self.destination.process = "weixin"
         raw = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
         punctuated = "锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。"
         self.assertTrue(self.inserter.replace_current(raw))
+        self.assertEqual(self.screen, "")
         self.send_text.reset_mock()
         self.send_backspaces.reset_mock()
         self.send_key_presses.reset_mock()
         committed = self.inserter.punctuate_and_commit_current(punctuated)
-        self.assertEqual(committed, raw + "。")
-        self.assertEqual(self.screen, raw + "。")
+        self.assertEqual(committed, punctuated)
+        self.assertEqual(self.screen, punctuated)
         self.send_backspaces.assert_not_called()
         self.send_key_presses.assert_not_called()
-        self.send_text.assert_called_once_with("。", guard=self.inserter._check_batch)
+        self.send_text.assert_not_called()
+        self.send_text_slow.assert_called_once_with(
+            punctuated, guard=self.inserter._check_batch
+        )
 
     def test_weixin_rejects_destructive_proofread_replacement(self):
         self.destination.process = "weixin"
         self.inserter.replace_current("原始文字。")
-        self.inserter.commit_current()
+        self.inserter.punctuate_and_commit_current("原始文字。")
         self.send_backspaces.reset_mock()
         self.assertFalse(self.inserter.replace_committed_range(0, 0, "修改文字。"))
         self.assertEqual(self.screen, "原始文字。")
@@ -281,6 +288,27 @@ class TargetTests(unittest.TestCase):
              )), patch.object(target._user, "IsWindow", return_value=True):
             self.assertTrue(dest.focused())
             self.assertTrue(dest.restore())
+
+    def test_wps_accepts_same_process_foreground_when_focus_is_temporarily_empty(self):
+        dest = self.capture(terminal=False, control=None, process="wps",
+                            window_class="WPSMainWindow")
+        with patch.object(target, "foreground", return_value=888), \
+             patch.object(target, "_focus", return_value=0), \
+             patch.object(target, "_identity", side_effect=lambda hwnd: (
+                 (dest.tid, dest.pid) if hwnd in (dest.hwnd, 888) else (0, 0)
+             )), patch.object(target._user, "IsWindow", return_value=True):
+            self.assertTrue(dest.focused())
+
+    def test_wps_accepts_recreated_top_window_in_same_locked_process(self):
+        dest = self.capture(terminal=False, control=None, process="wps",
+                            window_class="WPSMainWindow")
+        with patch.object(target, "foreground", return_value=888), \
+             patch.object(target, "_focus", return_value=999), \
+             patch.object(target, "_identity", side_effect=lambda hwnd: (
+                 (dest.tid, dest.pid) if hwnd in (888, 999) else (0, 0)
+             )), patch.object(target._user, "IsWindow", return_value=False):
+            self.assertTrue(dest.valid())
+            self.assertTrue(dest.focused())
 
     def test_same_window_different_control_not_restored(self):
         dest = self.capture()
