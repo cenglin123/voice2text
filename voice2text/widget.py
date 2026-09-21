@@ -493,7 +493,7 @@ class DictationWidget:
         height = round(BASE_H * scale)
         self._resize_surface(round(height * self._aspect), height)
 
-    def run_tick(self, tick, interval_ms: int = 150) -> None:
+    def run_tick(self, tick, interval_ms: int = 30) -> None:
         """驱动主循环：tick() 由调用方提供（热键/托盘命令/看门狗）。"""
         def _loop():
             try:

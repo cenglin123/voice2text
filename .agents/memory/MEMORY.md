@@ -8,15 +8,15 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-21 08:17
+> 最近重建：2026-09-21 08:23
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
 - [微信富文本输入框会话中断与锁句标点误覆盖](../../docs/problems/bugfix/weixin-volatile-input-and-punctuation-gate.md) — investigating · high · active · 更新于 2026-09-21
+- [Alt+V 多次切换后 Alt 修饰键可能残留按下状态](../../docs/problems/bugfix/hotkey-alt-latched-after-toggle.md) — mitigated · high · active · 更新于 2026-09-21
 - [WPS 自绘编辑区无法通过 UIA 可编辑验证](../../docs/problems/bugfix/wps-custom-editor-target-detection.md) — investigating · high · active · 更新于 2026-09-20
-- [Alt+V 多次切换后 Alt 修饰键可能残留按下状态](../../docs/problems/bugfix/hotkey-alt-latched-after-toggle.md) — mitigated · high · active · 更新于 2026-09-20
 - [未安装校对模型时禁止开启二次校对](../../docs/problems/bugfix/proofread-toggle-requires-model.md) — fixed · low · active · 更新于 2026-09-19
 - [Python 证书链失败导致模型下载无法完成](../../docs/problems/bugfix/model-download-certificate-chain.md) — mitigated · medium · active · 更新于 2026-09-19
 - [安装器可能选中不兼容的系统 Python](../../docs/problems/bugfix/installer-python-compatibility.md) — fixed · medium · active · 更新于 2026-09-19

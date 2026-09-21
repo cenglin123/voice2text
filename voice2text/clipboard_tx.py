@@ -93,8 +93,10 @@ def temporary_text(text: str):
                 if original is None:
                     _empty()
                 else:
+                    # 原 IDataObject 仍由当前进程持有；重新设为剪贴板对象即可。
+                    # OleFlushClipboard 会强制立即物化全部格式，真机上反复触发
+                    # CLIPBRD_E_CANT_CLOSE，且不是恢复仍存活 IDataObject 的必要步骤。
                     pythoncom.OleSetClipboard(original)
-                    pythoncom.OleFlushClipboard()
         except Exception as exc:
             # 粘贴已经完成，恢复失败不应把屏幕状态误报为注入失败。
             trace("clipboard_restore_failed", detail=str(exc))

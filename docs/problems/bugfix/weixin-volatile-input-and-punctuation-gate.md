@@ -6,7 +6,7 @@ status: investigating
 severity: high
 liveness: active
 last_confirmed: 2026-09-21
-confirmed_count: 7
+confirmed_count: 8
 tags: [微信, Weixin, UIA, RuntimeId, 标点, 上屏]
 related_files: [voice2text/target.py, voice2text/asr.py, voice2text/input.py, voice2text/keysender.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -31,6 +31,8 @@ evidence:
     ref: "诊断显示 punctuation/projected/injection 文本均正确，但微信屏幕仍出现重复标点和丢字"
   - type: error_log
     ref: "受保护粘贴已上屏，但恢复阶段报‘尚未调用 CoInitialize’，且端点缓冲使文字停止后才显示"
+  - type: error_log
+    ref: "实时上屏已正确，但每次原剪贴板恢复都报告 CLIPBRD_E_CANT_CLOSE"
 created_at: 2026-09-20
 updated_at: 2026-09-21
 ---
@@ -83,10 +85,12 @@ updated_at: 2026-09-21
 10. 工作线程改用配对的 `OleInitialize/OleUninitialize`，满足 OLE 剪贴板调用要求；原内容恢复
     失败只输出诊断，不再把已经完成的粘贴误判为上屏失败。取消微信端点缓冲，partial 变化尾部
     和停顿标点实时通过受保护粘贴更新。
+11. 恢复仍存活的原 IDataObject 时只调用 `OleSetClipboard`；不再用 `OleFlushClipboard` 强制
+    立即物化全部格式，避免真机持续触发 `CLIPBRD_E_CANT_CLOSE`。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 57 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
+`python scripts/check_session.py` 通过 59 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
 句首/重复标点、partial 实时受保护粘贴、停顿标点插入和校对阶段零覆盖；另检查隐私格式、原始
 IDataObject 恢复以及恢复异常不影响已完成上屏。尚未在真实微信客户端完成本轮 OLE 修复后的
 手工冒烟。
@@ -106,3 +110,4 @@ IDataObject 恢复以及恢复异常不影响已完成上屏。尚未在真实�
 - 待提交：慢速 Unicode 注入增加真实按键保持时间和字符间隔。
 - 待提交：微信 Qt 输入框改用受保护剪贴板事务。
 - 待提交：修复 OLE 初始化并恢复微信 partial 实时上屏。
+- 待提交：恢复原 IDataObject 时移除不必要的强制物化。

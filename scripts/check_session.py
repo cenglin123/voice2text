@@ -12,7 +12,7 @@ from voice2text.desktop import RuntimeOutput, SingleInstance
 from voice2text.tray import build_tray, toggle_label
 from pystray._util import win32
 from voice2text.activity import InputActivityGuard
-from voice2text.main import DictationApp
+from voice2text.main import DictationApp, UI_POLL_MS
 from voice2text.config import AppConfig, DEFAULTS
 from voice2text.proofread import Proofreader
 from voice2text.performance import PerformanceRecorder
@@ -523,6 +523,9 @@ class PerformanceTests(unittest.TestCase):
         self.assertIn("覆盖 1 条", recorder.format_summary())
 
 class DesktopTests(unittest.TestCase):
+    def test_hotkey_poll_interval_stays_below_perceptible_delay(self):
+        self.assertLessEqual(UI_POLL_MS, 30)
+
     def test_protected_clipboard_marks_temporary_text_private_and_restores(self):
         original = Mock()
         formats = {}
@@ -530,7 +533,6 @@ class DesktopTests(unittest.TestCase):
              patch.object(clipboard_tx, "_uninitialize_ole") as uninitialize, \
              patch.object(clipboard_tx.pythoncom, "OleGetClipboard", return_value=original), \
              patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore, \
-             patch.object(clipboard_tx.pythoncom, "OleFlushClipboard") as flush, \
              patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "EmptyClipboard"), \
@@ -553,7 +555,6 @@ class DesktopTests(unittest.TestCase):
         initialize.assert_called_once()
         uninitialize.assert_called_once()
         restore.assert_called_once_with(original)
-        flush.assert_called_once()
 
     def test_clipboard_restore_failure_does_not_report_successful_paste_as_failed(self):
         with patch.object(clipboard_tx, "_initialize_ole"), \
@@ -605,6 +606,15 @@ class DesktopTests(unittest.TestCase):
              patch("voice2text.hotkey._user.keybd_event") as release:
             listener.clear_toggle()
         release.assert_not_called()
+
+    def test_hotkey_clear_reports_dispatch_latency(self):
+        listener = HotkeyListener.__new__(HotkeyListener)
+        listener._toggle_event = __import__("threading").Event()
+        listener._toggle_event.set()
+        listener._last_trigger_ns = 1_000_000_000
+        with patch("voice2text.hotkey._release_latched_alt"), \
+             patch("voice2text.hotkey.perf_counter_ns", return_value=1_025_000_000):
+            self.assertEqual(listener.clear_toggle(), 25.0)
 
     def test_hotkey_event_sequence_survives_stale_async_state(self):
         import ctypes

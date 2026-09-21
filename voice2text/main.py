@@ -1,7 +1,7 @@
 """程序入口：常驻进程 = 托盘 + 悬浮窗 GUI + 热键/听写引擎。
 
 线程模型（Windows 上 tkinter 主循环必须在主线程）：
-- 主线程：tkinter mainloop（悬浮窗 + 设置窗），每 150ms tick() 轮询
+- 主线程：tkinter mainloop（悬浮窗 + 设置窗），每 30ms tick() 轮询
 - pystray 托盘：daemon 线程 run()，动作经 cmd_queue 投递主线程
 - keyboard 热键：自有线程回调，只 set Event
 - 识别：ASR worker 线程；停止时的统一校对在后台线程（结果经 ui_queue 回 UI）
@@ -39,6 +39,7 @@ ASR_REQUIRED_FILES = (
     "joiner-epoch-99-avg-1.onnx",
     "tokens.txt",
 )
+UI_POLL_MS = 30
 
 
 def check_models(cfg: AppConfig) -> tuple[bool, str]:
@@ -426,7 +427,9 @@ class DictationApp:
             self._activity_guard.close()
             self._activity_guard = None
         if self.hotkey is not None and self.hotkey.wait_toggle(0):
-            self.hotkey.clear_toggle()
+            latency_ms = self.hotkey.clear_toggle()
+            from voice2text.diagnostics import trace
+            trace("hotkey_dispatch", latency_ms=round(latency_ms, 1))
             self.request_toggle()
 
         while True:
@@ -688,7 +691,7 @@ def _gui_main(output) -> int:
             import traceback
 
             traceback.print_exc()
-        ui.widget.root.after(150, loop)
+        ui.widget.root.after(UI_POLL_MS, loop)
 
     ui.tray = build_tray(app.cmd_queue, app, hotkey=cfg.hotkey)
     ui.tray_menu = TrayMenu(ui.widget.root, app,

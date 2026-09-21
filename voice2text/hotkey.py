@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import threading
+from time import perf_counter_ns
 
 import keyboard  # type: ignore[import-untyped]
 
@@ -48,6 +49,7 @@ class HotkeyListener:
         self._combo = combo
         self._toggle_event = threading.Event()
         self._last_press = threading.Event()
+        self._last_trigger_ns = 0
         # suppress=True：吞掉 Alt+V，不再透传给焦点应用。中文输入法激活时，
         # 透传的 v 会进入拼音组合框并弹出 v 模式面板（实测 bug），必须拦截。
         self._hook = keyboard.add_hotkey(
@@ -55,6 +57,7 @@ class HotkeyListener:
         )
 
     def _on_hotkey(self) -> None:
+        self._last_trigger_ns = perf_counter_ns()
         self._last_press.set()
         self._toggle_event.set()
 
@@ -82,9 +85,12 @@ class HotkeyListener:
         """阻塞等待切换信号。返回是否等到（False 表示超时）。"""
         return self._toggle_event.wait(timeout)
 
-    def clear_toggle(self) -> None:
+    def clear_toggle(self) -> float:
+        """清除切换事件并返回从热键释放到主线程处理的毫秒数。"""
         self._toggle_event.clear()
         _release_latched_alt()
+        triggered = getattr(self, "_last_trigger_ns", 0)
+        return (perf_counter_ns() - triggered) / 1_000_000 if triggered else 0.0
 
     def rebind(self, combo: str) -> None:
         """更换热键组合（设置窗口保存时调用）。失败时抛异常由调用方提示。"""
