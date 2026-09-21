@@ -7,11 +7,21 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import ctypes
 import struct
 import time
 
 import pythoncom
 import win32clipboard
+
+from voice2text.diagnostics import trace
+
+
+_ole = ctypes.OleDLL("ole32", use_last_error=True)
+_ole.OleInitialize.argtypes = [ctypes.c_void_p]
+_ole.OleInitialize.restype = ctypes.c_long
+_ole.OleUninitialize.argtypes = []
+_ole.OleUninitialize.restype = None
 
 
 _PRIVACY_FORMATS = {
@@ -54,10 +64,20 @@ def _empty() -> None:
         win32clipboard.CloseClipboard()
 
 
+def _initialize_ole() -> None:
+    result = _ole.OleInitialize(None)
+    if result not in (0, 1):  # S_OK / S_FALSE 都必须配对 OleUninitialize
+        raise OSError(f"OleInitialize 失败：0x{result & 0xffffffff:08X}")
+
+
+def _uninitialize_ole() -> None:
+    _ole.OleUninitialize()
+
+
 @contextmanager
 def temporary_text(text: str):
     """发布临时文本，并在未发生外部剪贴板更新时恢复原始全部格式。"""
-    pythoncom.CoInitialize()
+    _initialize_ole()
     original = None
     sequence = None
     try:
@@ -75,5 +95,8 @@ def temporary_text(text: str):
                 else:
                     pythoncom.OleSetClipboard(original)
                     pythoncom.OleFlushClipboard()
+        except Exception as exc:
+            # 粘贴已经完成，恢复失败不应把屏幕状态误报为注入失败。
+            trace("clipboard_restore_failed", detail=str(exc))
         finally:
-            pythoncom.CoUninitialize()
+            _uninitialize_ole()

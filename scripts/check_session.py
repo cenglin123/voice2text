@@ -85,12 +85,14 @@ class SessionTests(unittest.TestCase):
             ["。", "，", "，", "，"],
         )
 
-    def test_weixin_buffers_partial_then_writes_punctuated_sentence_once(self):
+    def test_weixin_streams_partial_with_protected_paste_then_inserts_punctuation(self):
         self.destination.process = "weixin"
         raw = "锄禾日当午汗滴禾下土谁知盘中餐粒粒皆辛苦"
         punctuated = "锄禾日当午，汗滴禾下土，谁知盘中餐，粒粒皆辛苦。"
         self.assertTrue(self.inserter.replace_current(raw))
-        self.assertEqual(self.screen, "")
+        self.assertEqual(self.screen, raw)
+        self.paste_text.assert_called_once_with(raw)
+        self.paste_text.reset_mock()
         self.send_text.reset_mock()
         self.send_backspaces.reset_mock()
         self.send_key_presses.reset_mock()
@@ -98,10 +100,12 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(committed, punctuated)
         self.assertEqual(self.screen, punctuated)
         self.send_backspaces.assert_not_called()
-        self.send_key_presses.assert_not_called()
         self.send_text.assert_not_called()
-        self.paste_text.assert_called_once_with(punctuated)
         self.send_text_slow.assert_not_called()
+        self.assertEqual(
+            [call.args[0] for call in self.paste_text.call_args_list],
+            ["。", "，", "，", "，"],
+        )
 
     def test_weixin_rejects_destructive_proofread_replacement(self):
         self.destination.process = "weixin"
@@ -522,8 +526,8 @@ class DesktopTests(unittest.TestCase):
     def test_protected_clipboard_marks_temporary_text_private_and_restores(self):
         original = Mock()
         formats = {}
-        with patch.object(clipboard_tx.pythoncom, "CoInitialize"), \
-             patch.object(clipboard_tx.pythoncom, "CoUninitialize"), \
+        with patch.object(clipboard_tx, "_initialize_ole") as initialize, \
+             patch.object(clipboard_tx, "_uninitialize_ole") as uninitialize, \
              patch.object(clipboard_tx.pythoncom, "OleGetClipboard", return_value=original), \
              patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore, \
              patch.object(clipboard_tx.pythoncom, "OleFlushClipboard") as flush, \
@@ -546,8 +550,22 @@ class DesktopTests(unittest.TestCase):
                 pass
         self.assertEqual(set(formats), set(clipboard_tx._PRIVACY_FORMATS))
         self.assertEqual(set_data.call_count, len(clipboard_tx._PRIVACY_FORMATS))
+        initialize.assert_called_once()
+        uninitialize.assert_called_once()
         restore.assert_called_once_with(original)
         flush.assert_called_once()
+
+    def test_clipboard_restore_failure_does_not_report_successful_paste_as_failed(self):
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx.pythoncom, "OleGetClipboard", return_value=Mock()), \
+             patch.object(clipboard_tx, "_publish", return_value=7), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=7), \
+             patch.object(clipboard_tx.pythoncom, "OleSetClipboard", side_effect=RuntimeError("restore")), \
+             patch.object(clipboard_tx, "trace") as trace:
+            with clipboard_tx.temporary_text("测试"):
+                pass
+        trace.assert_called_once_with("clipboard_restore_failed", detail="restore")
 
     def test_hotkey_toggles_only_after_combo_release(self):
         with patch("voice2text.hotkey.keyboard.add_hotkey", return_value="hook") as add:

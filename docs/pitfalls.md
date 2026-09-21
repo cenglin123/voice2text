@@ -15,7 +15,7 @@
 - **keyboard 全局热键与 UIPI**：普通用户权限即可安装低级键盘钩子；真正的限制是 UIPI——焦点位于管理员权限窗口（任务管理器、管理员 CMD 等）时收不到热键。规避：不做默认提权；仅在用户需要在管理员窗口内听写时建议以管理员运行；首次启动引导按一次 Alt+V 做可达性自检。
 - **Windows Store 假 python.exe**：未装 Python 的机器上 `python` 命令可能命中 Store 别名（拉起商店而非运行）。规避：install.bat 检测时识别假别名，缺失则下载独立 CPython（python-build-standalone）到 runtime/。
 - **Git Bash 与 cmd 的 tar 不是同一个**：Git Bash 的 GNU tar 不认 zip；cmd 下 `tar` 是 System32 bsdtar（Win10 1803+ 自带），可解 zip。规避：开发期在 Git Bash 手动测试解压用 `/c/Windows/System32/tar.exe`。
-- **普通键击会被输入法转义，Qt 微信又会错误接收 VK_PACKET**：合成普通字母键会进入中文输入法组合框；SendInput KEYEVENTF_UNICODE 通常能绕过输入法，但微信 `Qt51514QWindowIcon` 真机把正确注入文本变成重复标点和丢字。微信端点整句与显式剪贴板模式使用受保护 Ctrl+V 事务，临时文本带禁止历史/云同步格式，且键间留有间隔防 IME 拆散组合键；其他应用仍默认 VK_PACKET。
+- **普通键击会被输入法转义，Qt 微信又会错误接收 VK_PACKET**：合成普通字母键会进入中文输入法组合框；SendInput KEYEVENTF_UNICODE 通常能绕过输入法，但微信 `Qt51514QWindowIcon` 真机把正确注入文本变成重复标点和丢字。微信 partial 变化尾部、标点和显式剪贴板模式使用受保护 Ctrl+V 事务，临时文本带禁止历史/云同步格式，且键间留有间隔防 IME 拆散组合键；其他应用仍默认 VK_PACKET。
 - **WPS 顶层窗口和编辑控件可能跨进程**：真机快照中 WPS 顶层 `OpusApp` 与实际 `EXCEL6` 焦点分别属于不同 PID。目标捕获必须同时记录顶层身份和捕获时编辑进程，后续只允许这两个 PID；不能用“焦点必须与顶层同进程”作为恢复条件。
 - **控制台中文乱码**：Windows 控制台默认 GBK。规避：Python 端统一 UTF-8（`PYTHONUTF8=1`），脚本输出避免依赖代码页。
 

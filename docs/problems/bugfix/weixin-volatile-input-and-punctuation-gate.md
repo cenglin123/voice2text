@@ -5,8 +5,8 @@ title: 微信富文本输入框会话中断与锁句标点误覆盖
 status: investigating
 severity: high
 liveness: active
-last_confirmed: 2026-09-20
-confirmed_count: 6
+last_confirmed: 2026-09-21
+confirmed_count: 7
 tags: [微信, Weixin, UIA, RuntimeId, 标点, 上屏]
 related_files: [voice2text/target.py, voice2text/asr.py, voice2text/input.py, voice2text/keysender.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -29,8 +29,10 @@ evidence:
     ref: "句末追加版真机输出‘锄禾日当午汗滴禾下土谁知盘中餐？？粒皆辛苦。’"
   - type: error_log
     ref: "诊断显示 punctuation/projected/injection 文本均正确，但微信屏幕仍出现重复标点和丢字"
+  - type: error_log
+    ref: "受保护粘贴已上屏，但恢复阶段报‘尚未调用 CoInitialize’，且端点缓冲使文字停止后才显示"
 created_at: 2026-09-20
-updated_at: 2026-09-20
+updated_at: 2026-09-21
 ---
 
 # 微信富文本输入框会话中断与锁句标点误覆盖
@@ -78,13 +80,16 @@ updated_at: 2026-09-20
 9. 微信端点整句不再走 `VK_PACKET`，改用受保护剪贴板事务粘贴。临时文本声明禁止进入剪贴板
    历史和云同步；粘贴完成后仅当剪贴板序号仍属于本事务时恢复原始 IDataObject，避免覆盖用户
    同时复制的新内容。
+10. 工作线程改用配对的 `OleInitialize/OleUninitialize`，满足 OLE 剪贴板调用要求；原内容恢复
+    失败只输出诊断，不再把已经完成的粘贴误判为上屏失败。取消微信端点缓冲，partial 变化尾部
+    和停顿标点实时通过受保护粘贴更新。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 56 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
-句首/重复标点，以及微信端点缓冲模式在 partial 阶段零写入、endpoint 仅一次整句粘贴、
-校对阶段零覆盖；新增检查确认微信改用受保护剪贴板、隐私格式完整发布并恢复原 IDataObject。
-尚未在真实微信客户端完成本轮剪贴板事务的手工冒烟。
+`python scripts/check_session.py` 通过 57 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
+句首/重复标点、partial 实时受保护粘贴、停顿标点插入和校对阶段零覆盖；另检查隐私格式、原始
+IDataObject 恢复以及恢复异常不影响已完成上屏。尚未在真实微信客户端完成本轮 OLE 修复后的
+手工冒烟。
 
 ## 风险和后续
 
@@ -100,3 +105,4 @@ updated_at: 2026-09-20
 - 待提交：微信改为 partial 内存缓冲、endpoint 慢速整句写入。
 - 待提交：慢速 Unicode 注入增加真实按键保持时间和字符间隔。
 - 待提交：微信 Qt 输入框改用受保护剪贴板事务。
+- 待提交：修复 OLE 初始化并恢复微信 partial 实时上屏。

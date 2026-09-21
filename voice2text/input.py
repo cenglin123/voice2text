@@ -25,8 +25,8 @@ from voice2text.diagnostics import trace
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
 _INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
-_BUFFERED_INPUT_APPS = {"weixin"}
 _CLIPBOARD_INPUT_APPS = {"weixin"}
+_NO_PROOFREAD_REWRITE_APPS = {"weixin"}
 
 
 def _semantic_tail(text: str) -> str:
@@ -159,11 +159,6 @@ class TextInserter:
                 self._detached = True
                 self._current = ""
                 return False
-            # 微信富文本框不可靠地处理退格、光标回溯和活动组合区中的标点追加。
-            # 因此 partial 只在内存更新，等 endpoint 后一次写入完整句子。
-            if self._target_process() in _BUFFERED_INPUT_APPS:
-                self._current = target
-                return True
             # sherpa partial 会修正尾部，但大部分前缀稳定。只替换分歧后的尾部，
             # 避免每 250ms 整句清空再重打造成闪烁，也显著降低长句注入延迟。
             common = 0
@@ -207,18 +202,6 @@ class TextInserter:
                 return ""
             prefix = " " if _ASCII_WORD_TAIL.match(self._last_committed_tail or " ") else ""
             target = prefix + text
-            if self._target_process() in _BUFFERED_INPUT_APPS:
-                if not self.is_editable_focused():
-                    return ""
-                try:
-                    self._insert_buffered_text(target)
-                except Exception as exc:  # noqa: BLE001
-                    self._session_open = False
-                    self.aborted = True
-                    self.abort_reason = f"整句写入失败，已停止上屏：{exc}"
-                    return ""
-                self._current = target
-                return self.commit_current()
             if target != self._current:
                 additions = self._punctuation_insertions(self._current, target)
                 if additions is None or not self.is_editable_focused():
@@ -260,7 +243,7 @@ class TextInserter:
             prefix_space = old_span[0][:1] if old_span[0].startswith(" ") else ""
             replacement = prefix_space + new_text.strip()
             old_text = "".join(old_span)
-            if self._target_process() in _BUFFERED_INPUT_APPS:
+            if self._target_process() in _NO_PROOFREAD_REWRITE_APPS:
                 return False
             additions = self._punctuation_insertions(old_text, replacement)
             if additions is not None:
@@ -333,7 +316,7 @@ class TextInserter:
 
     def _delete_chars(self, n: int) -> None:
         self._check_batch()
-        if self._use_clipboard:
+        if self._uses_clipboard():
             for _ in range(n):
                 self._check_batch()
                 keyboard.press_and_release("backspace")
@@ -343,7 +326,7 @@ class TextInserter:
 
     def _insert_text(self, text: str) -> None:
         self._check_batch()
-        if self._use_clipboard:
+        if self._uses_clipboard():
             self._paste_text(text)
         else:
             keysender.send_text(text, guard=self._check_batch)
@@ -351,6 +334,8 @@ class TextInserter:
     def _paste_text(self, text: str) -> None:
         """以不进入 Win+V/云同步的临时剪贴板事务粘贴，并恢复原始全部格式。"""
         self._check_batch()
+        trace("injection", process=self._target_process(), text=text,
+              transport="protected_clipboard")
         with temporary_text(text):
             # 键间必须留间隔：IME 的异步钩子可能把零间隔 Ctrl+V 拆散。
             keyboard.release("ctrl")
@@ -365,11 +350,5 @@ class TextInserter:
             finally:
                 keyboard.release("ctrl")
 
-    def _insert_buffered_text(self, text: str) -> None:
-        use_clipboard = self._use_clipboard or self._target_process() in _CLIPBOARD_INPUT_APPS
-        trace("injection", process=self._target_process(), text=text,
-              transport="protected_clipboard" if use_clipboard else "unicode_slow")
-        if use_clipboard:
-            self._paste_text(text)
-        else:
-            keysender.send_text_slow(text, guard=self._check_batch)
+    def _uses_clipboard(self) -> bool:
+        return self._use_clipboard or self._target_process() in _CLIPBOARD_INPUT_APPS
