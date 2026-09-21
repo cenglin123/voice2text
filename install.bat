@@ -97,10 +97,13 @@ if errorlevel 1 (echo   [FAIL] model download failed, check network and retry & 
 echo [4/4] Verifying installation ...
 "%PY%" -c "import voice2text, sherpa_onnx, llama_cpp, sounddevice, keyboard, uiautomation, pystray, pyperclip, pythoncom, win32clipboard, tkinter; print('  all modules imported OK')"
 if errorlevel 1 (echo   [FAIL] module import failed & goto fail)
+"%PY%" scripts\create_shortcut.py "%PY%"
+if errorlevel 1 echo   [WARN] Could not create the shortcut. Use the friendly launcher batch file instead.
 
 echo.
 echo ============================================
-echo  Install OK. Start with: run.bat
+echo  Install OK. Start with the new shortcut
+echo  or use the friendly launcher batch file.
 echo ============================================
 exit /b 0
 
@@ -111,7 +114,10 @@ exit /b 1
 
 :offline_install
 echo Verifying self-contained offline installation ...
-"runtime\python\python.exe" -I -X utf8 scripts\verify_install.py
+set "PY=runtime\python\python.exe"
+"%PY%" -I -X utf8 scripts\verify_install.py
 if errorlevel 1 goto fail
-echo Install OK. Start with run.bat
+"%PY%" -I -X utf8 scripts\create_shortcut.py "%PY%"
+if errorlevel 1 echo [WARN] Could not create the shortcut. Use the friendly launcher batch file instead.
+echo Install OK. Start with the new shortcut or friendly launcher batch file.
 exit /b 0

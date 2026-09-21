@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 
 from build_release import build_release, _default_config, _version
+from create_shortcut import create_shortcut, shortcut_spec
 from download_models import ASR_NAME, ASR_REQUIRED, PUNCT_NAME
 
 
@@ -29,6 +31,13 @@ def main() -> int:
             names = archive.namelist()
             prefix = f"voice2text-v{_version()}-windows-x64/"
             assert prefix + "install.bat" in names
+            assert prefix + "安装程序.bat" in names
+            assert prefix + "启动程序.bat" in names
+            assert prefix + "voice2text.ico" in names
+            assert prefix + "scripts/create_shortcut.py" in names
+            assert b"run.bat" in archive.read(prefix + "启动程序.bat")
+            assert b"install.bat" in archive.read(prefix + "安装程序.bat")
+            assert archive.read(prefix + "voice2text.ico").startswith(b"\x00\x00\x01\x00")
             assert prefix + "voice2text/main.py" in names
             assert prefix + "scripts/apply_update.ps1" in names
             source_modules = {
@@ -48,6 +57,26 @@ def main() -> int:
             guide = archive.read(prefix + "安装说明.txt").decode("utf-8")
             assert "https://github.com/cenglin123/voice2text/issues" in guide
             assert archive.testzip() is None
+        spec = shortcut_spec(root, root / "runtime/python/python.exe")
+        assert spec["target"].endswith("runtime\\python\\pythonw.exe")
+        assert spec["arguments"].endswith('run_gui.pyw"')
+        assert spec["icon"].endswith("voice2text.ico,0")
+        shortcut_root = root / "shortcut"
+        shortcut_python = shortcut_root / "runtime/python/python.exe"
+        shortcut_python.parent.mkdir(parents=True)
+        shortcut_python.write_bytes(b"fixture")
+        shortcut_python.with_name("pythonw.exe").write_bytes(b"fixture")
+        (shortcut_root / "run_gui.pyw").write_text("", encoding="utf-8")
+        shutil.copy2(Path(__file__).resolve().parent.parent / "voice2text.ico",
+                     shortcut_root / "voice2text.ico")
+        shortcut_values = shortcut_spec(shortcut_root, shortcut_python)
+        shortcut = create_shortcut(shortcut_root, shortcut_python)
+        assert shortcut.is_file() and shortcut.name == "启动 voice2text.lnk"
+        import win32com.client
+        saved = win32com.client.Dispatch("WScript.Shell").CreateShortcut(str(shortcut))
+        assert Path(saved.TargetPath).resolve() == shortcut_python.with_name("pythonw.exe").resolve()
+        assert saved.Arguments == shortcut_values["arguments"]
+        assert saved.IconLocation == shortcut_values["icon"]
         runtime = root / "runtime"
         runtime.mkdir()
         for name in ("python.exe", "pythonw.exe"):

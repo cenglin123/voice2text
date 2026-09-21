@@ -14,14 +14,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-TEXT_FILES = ("install.bat", "run.bat", "run_gui.pyw", "requirements.txt")
+TEXT_FILES = (
+    "install.bat", "安装程序.bat", "run.bat", "启动程序.bat", "run_gui.pyw",
+    "requirements.txt",
+)
+ASSET_FILES = ("voice2text.ico",)
 PACKAGE_FILES = tuple(f"voice2text/{name}.py" for name in (
     "__init__", "activity", "asr", "capture", "clipboard_tx", "config", "desktop",
     "diagnostics", "hotkey", "input", "keysender", "layered", "main", "model_download",
     "performance", "proofread", "punctuation", "settings_window", "target", "tray",
     "tray_menu", "trayicon", "update", "widget",
 ))
-SCRIPT_FILES = ("scripts/apply_update.ps1", "scripts/download_models.py", "scripts/verify_install.py")
+SCRIPT_FILES = (
+    "scripts/apply_update.ps1", "scripts/create_shortcut.py",
+    "scripts/download_models.py", "scripts/verify_install.py",
+)
 FORBIDDEN_PARTS = (".git", ".venv", "__pycache__")
 
 
@@ -37,7 +44,7 @@ def _default_config() -> dict:
 
 
 def _copy_runtime_files(stage: Path) -> None:
-    for rel in TEXT_FILES + SCRIPT_FILES + PACKAGE_FILES:
+    for rel in TEXT_FILES + ASSET_FILES + SCRIPT_FILES + PACKAGE_FILES:
         source = ROOT / rel
         target = stage / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -48,8 +55,9 @@ def _copy_runtime_files(stage: Path) -> None:
     (stage / "安装说明.txt").write_text(
         "voice2text Windows x64 安装版\n\n"
         "1. 解压整个文件夹，不要直接在压缩包内运行。\n"
-        "2. 双击 install.bat，等待依赖和约 1.5GB 模型下载完成。\n"
-        "3. 双击 run.bat。程序常驻系统托盘，按 Alt+V 开始或停止听写。\n"
+        "2. 双击“安装程序.bat”，等待依赖和约 1.5GB 模型下载完成。\n"
+        "3. 双击安装后生成的“启动 voice2text”快捷方式；也可双击“启动程序.bat”。\n"
+        "   程序常驻系统托盘，按 Alt+V 开始或停止听写。\n"
         "4. 调试时运行：run.bat --debug\n\n"
         "要求：Windows 10/11 x64、麦克风、约 2.5GB 可用空间、安装期间可联网。\n\n"
         "项目主页：https://github.com/cenglin123/voice2text\n"
@@ -129,7 +137,8 @@ def build_release(output_dir: Path, wheel: Path, runtime: Path | None = None,
             (stage / "offline-bundle.txt").write_text("voice2text offline base bundle\n", encoding="ascii")
             (stage / "安装说明.txt").write_text(
                 "voice2text Windows x64 离线基础版\n\n"
-                "完整解压到可写目录，双击 install.bat 验证安装，再双击 run.bat 启动。\n"
+                "完整解压到可写目录，双击“安装程序.bat”验证安装。\n"
+                "安装后双击带图标的“启动 voice2text”快捷方式；也可双击“启动程序.bat”。\n"
                 "已包含独立 Python、所有依赖、语音和标点模型，无需系统 Python 或联网。\n"
                 "Alt+V 开始/停止听写；设置 → 识别与校对可联网下载可选校对模型（约 1.1 GB）。\n"
                 "下载完成后开启二次校对并保存；所有识别、标点和校对均在本地执行。\n"
