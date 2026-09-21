@@ -7,13 +7,20 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image, ImageGrab
-from voice2text.settings_window import SettingsWindow, RoundedButton, RoundedField
+from voice2text.settings_window import (
+    SettingsWindow, RoundedButton, RoundedField, _normalize_combo,
+)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path)
     args = parser.parse_args()
+    assert _normalize_combo("Pause", set()) == "pause"
+    assert _normalize_combo("F8", set()) == "f8"
+    assert _normalize_combo("v", {"alt"}) == "alt+v"
+    assert _normalize_combo("k", {"ctrl", "shift"}) == "ctrl+shift+k"
+    assert _normalize_combo("Prior", set()) == "page up"
     applied = []
     cfg = {"hotkey": "alt+v", "widget_scale": 1.0, "widget_aspect": 3.27,
            "widget_opacity": 0.92, "proofread_enabled": True,
@@ -45,6 +52,15 @@ def main():
             assert all(mask.itemcget(1, "outline") == "#344865"
                        for mask in window._corner_masks)
             assert window._hotkey_entry.coords(window._hotkey_entry._window)[0] == 13
+            window._start_capture()
+            window.root.event_generate("<KeyPress-Pause>", when="now")
+            assert window._cfg["hotkey"] == "pause"
+            assert not window._capturing
+            window._start_capture()
+            window.root.event_generate("<KeyPress-Control_L>", when="now")
+            window.root.event_generate("<KeyPress-k>", when="now")
+            assert window._cfg["hotkey"] == "ctrl+k"
+            assert not window._capturing
             # 长宽比处于最小值时，左端圆点也必须完整落在 Canvas 边框内。
             left_knob = window._sliders[1].bbox("knob")
             assert left_knob is not None and left_knob[0] >= 1, left_knob

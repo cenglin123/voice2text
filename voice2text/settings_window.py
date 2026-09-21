@@ -299,34 +299,26 @@ class RoundedField(tkinter.Canvas):
 
 # ---- 组合串规范化 ----
 
-_MOD_CTRL = 0x0004
-_MOD_SHIFT = 0x0001
-_MOD_ALT = 0x20000  # Windows 下 Tk 的 Alt 掩码；部分版本为 Mod1(0x8)
-_MOD_ALT_ALT = 0x0008
+_MODIFIER_KEYSYMS = {
+    "control_l": "ctrl", "control_r": "ctrl",
+    "alt_l": "alt", "alt_r": "alt",
+    "shift_l": "shift", "shift_r": "shift",
+}
+_KEYSYM_NAMES = {
+    "escape": "esc",
+    "return": "enter",
+    "prior": "page up",
+    "next": "page down",
+}
 
 
-def _normalize_combo(ev) -> str | None:
-    """把 tkinter 按键事件规范化为 keyboard 库组合串（必须含 Ctrl 或 Alt，防单键劫持）。"""
-    name = ev.keysym.lower()
-    if name in (
-        "shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r",
-        "win_l", "win_r", "meta_l", "meta_r", "caps_lock",
-    ):
+def _normalize_combo(keysym: str, modifiers: set[str]) -> str | None:
+    """把本次捕获中实际按下的按键规范化为 keyboard 库组合串。"""
+    name = keysym.lower()
+    if name in (*_MODIFIER_KEYSYMS, "win_l", "win_r", "meta_l", "meta_r", "caps_lock"):
         return None
-    s = int(ev.state)
-    ctrl = bool(s & _MOD_CTRL)
-    alt = bool(s & (_MOD_ALT | _MOD_ALT_ALT))
-    shift = bool(s & _MOD_SHIFT)
-    if not (ctrl or alt):
-        return None
-    parts = []
-    if ctrl:
-        parts.append("ctrl")
-    if alt:
-        parts.append("alt")
-    if shift:
-        parts.append("shift")
-    parts.append(name)
+    parts = [modifier for modifier in ("ctrl", "alt", "shift") if modifier in modifiers]
+    parts.append(_KEYSYM_NAMES.get(name, name))
     return "+".join(parts)
 
 
@@ -775,29 +767,44 @@ class SettingsWindow:
         self._hotkey_btn.set_style(text="按组合键…", bg=_ACCENT)
         self._hotkey_entry.set_foreground(_ACCENT)
         self._hotkey_var.set("")
+        modifiers: set[str] = set()
 
-        def capture_key(ev):
+        def capture_press(ev):
             if not self._capturing:
                 return "break"
             try:
                 if ev.keysym == "Escape":  # Esc 取消
                     self._finish_capture(None)
                     return "break"
-                combo = _normalize_combo(ev)
+                modifier = _MODIFIER_KEYSYMS.get(ev.keysym.lower())
+                if modifier:
+                    modifiers.add(modifier)
+                    return "break"
+                combo = _normalize_combo(ev.keysym, modifiers)
                 if combo:
                     self._finish_capture(combo)
                 return "break"
             except tkinter.TclError:
                 return "break"  # 窗口已销毁（捕获中关窗），静默退出捕获态
 
-        self._capture_binding = self.root.bind("<Key>", capture_key, add="+")
+        def capture_release(ev):
+            modifier = _MODIFIER_KEYSYMS.get(ev.keysym.lower())
+            if modifier:
+                modifiers.discard(modifier)
+            return "break"
+
+        self._capture_bindings = (
+            ("<KeyPress>", self.root.bind("<KeyPress>", capture_press, add="+")),
+            ("<KeyRelease>", self.root.bind("<KeyRelease>", capture_release, add="+")),
+        )
         self._hotkey_btn.focus_set()
 
     def _finish_capture(self, combo: str | None) -> None:
         self._capturing = False
-        if getattr(self, "_capture_binding", None):
-            self.root.unbind("<Key>", self._capture_binding)
-            self._capture_binding = None
+        for sequence, binding in getattr(self, "_capture_bindings", ()):
+            if binding:
+                self.root.unbind(sequence, binding)
+        self._capture_bindings = ()
         self._hotkey_btn.set_style(text="修改", bg="#304766")
         self._hotkey_entry.set_foreground(_TEXT)
         if combo:
