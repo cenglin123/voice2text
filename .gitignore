@@ -9,6 +9,7 @@ runtime_embed.zip
 get-pip.py
 debug_capture.wav
 *.wav
+*.lnk
 .env
 dist/
 vendor/*.whl

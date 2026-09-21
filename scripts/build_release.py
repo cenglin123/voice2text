@@ -43,6 +43,39 @@ def _default_config() -> dict:
     return dict(DEFAULTS)
 
 
+def _installation_guide(offline: bool) -> str:
+    title = f"voice2text v{_version()} Windows x64 {'离线自包含版' if offline else '安装版'}"
+    install_detail = (
+        "此版本已包含独立 Python、全部运行依赖、语音模型和标点模型，基础功能无需联网。"
+        if offline else
+        "安装过程会准备 Python、运行依赖、语音模型和标点模型，需要联网并预留约 2.5 GB 空间。"
+    )
+    return (
+        f"{title}\n\n"
+        "【首次使用】\n"
+        "1. 完整解压整个文件夹到可写目录，不要直接在压缩包内运行。\n"
+        "2. 双击“安装程序.bat”，等待验证或安装完成。\n"
+        "3. 双击新生成的“启动 voice2text”快捷方式。若未生成，可双击“启动程序.bat”。\n"
+        f"4. {install_detail}\n\n"
+        "【日常使用】\n"
+        "- 程序启动后常驻右下角系统托盘，不会一直显示命令行窗口。\n"
+        "- 默认按 Alt+V 开始听写，再按一次停止；可在设置页修改快捷键。\n"
+        "- 请先把光标放入目标输入框，再按快捷键开始。\n"
+        "- 设置页可调整悬浮窗、界面字体、提示音和开机启动。\n\n"
+        "【可选二次校对】\n"
+        "设置 → 识别与校对 → 下载校对模型（约 1.1 GB）。下载完成后才能开启二次校对。\n"
+        "语音识别、标点恢复和二次校对全部在本机执行，不会上传录音或听写内容。\n\n"
+        "【检查更新】\n"
+        "设置 → 识别与校对 → 检查更新。程序会校验下载文件后安装并自动重启。\n\n"
+        "【排查问题】\n"
+        "- 可从设置页或托盘菜单打开“运行输出”。\n"
+        "- 高级调试可运行：run.bat --debug\n"
+        "- 若快捷键在管理员权限窗口中无响应，请以相同权限运行 voice2text。\n\n"
+        "项目主页：https://github.com/cenglin123/voice2text\n"
+        "问题反馈：https://github.com/cenglin123/voice2text/issues\n"
+    )
+
+
 def _copy_runtime_files(stage: Path) -> None:
     for rel in TEXT_FILES + ASSET_FILES + SCRIPT_FILES + PACKAGE_FILES:
         source = ROOT / rel
@@ -52,18 +85,7 @@ def _copy_runtime_files(stage: Path) -> None:
     (stage / "config.json").write_text(
         json.dumps(_default_config(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
     )
-    (stage / "安装说明.txt").write_text(
-        "voice2text Windows x64 安装版\n\n"
-        "1. 解压整个文件夹，不要直接在压缩包内运行。\n"
-        "2. 双击“安装程序.bat”，等待依赖和约 1.5GB 模型下载完成。\n"
-        "3. 双击安装后生成的“启动 voice2text”快捷方式；也可双击“启动程序.bat”。\n"
-        "   程序常驻系统托盘，按 Alt+V 开始或停止听写。\n"
-        "4. 调试时运行：run.bat --debug\n\n"
-        "要求：Windows 10/11 x64、麦克风、约 2.5GB 可用空间、安装期间可联网。\n\n"
-        "项目主页：https://github.com/cenglin123/voice2text\n"
-        "问题反馈：https://github.com/cenglin123/voice2text/issues\n",
-        encoding="utf-8",
-    )
+    (stage / "安装说明.txt").write_text(_installation_guide(False), encoding="utf-8")
 
 
 def _copy_wheel(stage: Path, wheel: Path) -> None:
@@ -135,17 +157,7 @@ def build_release(output_dir: Path, wheel: Path, runtime: Path | None = None,
             config["proofread_enabled"] = False
             (stage / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             (stage / "offline-bundle.txt").write_text("voice2text offline base bundle\n", encoding="ascii")
-            (stage / "安装说明.txt").write_text(
-                "voice2text Windows x64 离线基础版\n\n"
-                "完整解压到可写目录，双击“安装程序.bat”验证安装。\n"
-                "安装后双击带图标的“启动 voice2text”快捷方式；也可双击“启动程序.bat”。\n"
-                "已包含独立 Python、所有依赖、语音和标点模型，无需系统 Python 或联网。\n"
-                "Alt+V 开始/停止听写；设置 → 识别与校对可联网下载可选校对模型（约 1.1 GB）。\n"
-                "下载完成后开启二次校对并保存；所有识别、标点和校对均在本地执行。\n"
-                "运行输出可从设置或托盘打开。调试启动：run.bat --debug。\n\n"
-                "项目主页：https://github.com/cenglin123/voice2text\n"
-                "问题反馈：https://github.com/cenglin123/voice2text/issues\n",
-                encoding="utf-8")
+            (stage / "安装说明.txt").write_text(_installation_guide(True), encoding="utf-8")
         _validate_stage(stage, offline=runtime is not None)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for path in sorted(stage.rglob("*")):
@@ -155,6 +167,9 @@ def build_release(output_dir: Path, wheel: Path, runtime: Path | None = None,
                     archive.writestr(info, path.read_bytes())
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     sha_path.write_text(f"{digest}  {zip_path.name}\n", encoding="ascii")
+    (output_dir / "安装说明.txt").write_text(
+        _installation_guide(runtime is not None), encoding="utf-8",
+    )
     return zip_path, sha_path
 
 

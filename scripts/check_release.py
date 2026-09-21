@@ -23,6 +23,7 @@ def main() -> int:
             archive.writestr("llama_cpp_python-0.3.35.dist-info/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-win_amd64\n")
         zip_path, sha_path = build_release(root / "out", wheel)
         assert zip_path.is_file() and sha_path.is_file()
+        assert (root / "out/安装说明.txt").is_file()
         original = zip_path.read_bytes()
         assert sha_path.read_text().split()[0] == hashlib.sha256(original).hexdigest()
         build_release(root / "out", wheel)
@@ -56,6 +57,7 @@ def main() -> int:
             assert config == _default_config()
             guide = archive.read(prefix + "安装说明.txt").decode("utf-8")
             assert "https://github.com/cenglin123/voice2text/issues" in guide
+            assert "【首次使用】" in guide and "【检查更新】" in guide
             assert archive.testzip() is None
         spec = shortcut_spec(root, root / "runtime/python/python.exe")
         assert spec["target"].endswith("runtime\\python\\pythonw.exe")
@@ -91,6 +93,7 @@ def main() -> int:
         private.parent.mkdir()
         private.write_bytes(b"must not ship")
         zip_path, _ = build_release(root / "offline", wheel, runtime, models)
+        assert "离线自包含版" in (root / "offline/安装说明.txt").read_text(encoding="utf-8")
         with zipfile.ZipFile(zip_path) as archive:
             names = archive.namelist()
             assert prefix + "offline-bundle.txt" in names
