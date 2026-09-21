@@ -19,6 +19,8 @@ from PIL import Image, ImageDraw, ImageTk
 
 from voice2text.config import PROJECT_ROOT, load_config
 from voice2text.model_download import model_download
+from voice2text import __version__
+from voice2text.update import update_manager
 
 _BG = "#16243D"
 _CARD = "#20314D"
@@ -331,9 +333,11 @@ def _normalize_combo(ev) -> str | None:
 class SettingsWindow:
     """设置窗口。apply_cb(config_dict) 在保存时被调用（主线程），返回生效值供写盘。"""
 
-    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None, on_debug=None) -> None:
+    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None,
+                 on_debug=None, on_update=None) -> None:
         self._apply_cb = apply_cb
         self._on_debug = on_debug
+        self._on_update = on_update
         self._cfg = dict(cfg_dict)
         self._font_scale = float(self._cfg.get("font_scale", 1.0))
         self._font_widgets = []
@@ -532,11 +536,27 @@ class SettingsWindow:
             box.pack(side="left", fill="x", expand=True)
             tkinter.Label(box, text=label, bg=_CARD, fg=_TEXT, font=(_FONT, -14)).pack(anchor="w")
             tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB, font=(_FONT, -12)).pack(anchor="w", pady=(2, 0))
+
+        update_row = tkinter.Frame(c3, bg=_CARD)
+        update_row.pack(fill="x", pady=(18, 2))
+        update_box = tkinter.Frame(update_row, bg=_CARD)
+        update_box.pack(side="left", fill="x", expand=True)
+        tkinter.Label(update_box, text=f"软件更新 · 当前 v{__version__}", bg=_CARD, fg=_TEXT,
+                      font=(_FONT, -14)).pack(anchor="w")
+        self._update_status = tkinter.StringVar(value="可手动检查 GitHub 正式版本")
+        tkinter.Label(update_box, textvariable=self._update_status, bg=_CARD, fg=_SUB,
+                      font=(_FONT, -12), wraplength=390, justify="left").pack(anchor="w", pady=(2, 0))
+        self._update_button = RoundedButton(
+            update_row, "检查更新", self._update_clicked,
+            bg=_TRACK, fg=_TEXT, width=150, height=38,
+        )
+        self._update_button.pack(side="right", padx=(12, 0))
+        self._poll_update()
         self._record_font_widgets()
         self._set_font_scale(self._font_scale)
         self._select_page("all")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
-        self.root.bind("<Destroy>", self._cancel_model_poll, add="+")
+        self.root.bind("<Destroy>", self._cancel_polls, add="+")
         self.root.bind("<Escape>", lambda e: self._finish_capture(None) if self._capturing else self._close())
         self.root.deiconify()
         self.root.lift()
@@ -569,9 +589,47 @@ class SettingsWindow:
                                         fg=_SUB if active or ready else _TEXT)
         self._model_poll = self.root.after(500, self._poll_model_download)
 
-    def _cancel_model_poll(self, event) -> None:
+    def _update_clicked(self) -> None:
+        snapshot = update_manager.snapshot()
+        if snapshot.state == "ready" and snapshot.archive is not None:
+            if self._on_update is None:
+                return
+            if messagebox.askyesno(
+                "安装更新",
+                f"v{snapshot.version} 已下载并验证。\n\n现在退出程序、安装更新并自动重启吗？",
+                parent=self.root,
+            ):
+                self._on_update(snapshot.archive, snapshot.version)
+                self.root.destroy()
+            return
+        update_manager.start()
+
+    def _poll_update(self) -> None:
+        if not self.root.winfo_exists():
+            return
+        snapshot = update_manager.snapshot()
+        if not update_manager.supported:
+            text, fg = "仅安装版支持", _SUB
+            message = "源码开发环境不执行自更新；分发版可在此一键更新"
+        else:
+            labels = {
+                "idle": "检查更新", "checking": "检查中…", "downloading": "下载中…",
+                "ready": "安装并重启", "current": "重新检查", "error": "重试",
+            }
+            text = labels.get(snapshot.state, "检查更新")
+            fg = _SUB if snapshot.state in {"checking", "downloading"} else _TEXT
+            message = snapshot.message or "可手动检查 GitHub 正式版本"
+        self._update_status.set(message)
+        self._update_button.set_style(text=text, fg=fg)
+        self._update_poll = self.root.after(500, self._poll_update)
+
+    def _cancel_polls(self, event) -> None:
         if event.widget is self.root:
-            self.root.after_cancel(self._model_poll)
+            for name in ("_model_poll", "_update_poll"):
+                try:
+                    self.root.after_cancel(getattr(self, name))
+                except (AttributeError, tkinter.TclError):
+                    pass
 
     def _apply_window_rounding(self) -> None:
         """用透明色角罩裁掉无边框设置窗的四个方形外角。"""

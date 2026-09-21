@@ -30,6 +30,7 @@ def main() -> int:
             prefix = f"voice2text-v{_version()}-windows-x64/"
             assert prefix + "install.bat" in names
             assert prefix + "voice2text/main.py" in names
+            assert prefix + "scripts/apply_update.ps1" in names
             source_modules = {
                 path.name for path in (Path(__file__).resolve().parent.parent / "voice2text").glob("*.py")
             }

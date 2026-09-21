@@ -24,6 +24,10 @@ python -m venv .venv
 - 校对 GGUF 为可选组件：设置 → 识别与校对 → 下载校对模型（约 1.1 GB），完成后打开二次校对并保存。下载失败可重试，下载过程中仍可使用基础听写；关闭设置不终止下载，退出程序终止下载。网络仅用于用户明确触发的模型安装，推理全部在本地。
 - 源码仓库的 `install.bat` 在线准备环境：探测 Python 3.11–3.13 x64 和 Tk，不兼容时下载固定独立运行时，再安装依赖、下载模型。Python 的证书链失败时，模型下载可回退系统 curl，保持证书校验。
 - `run.bat` 默认无控制台，常驻托盘并显示悬浮窗；运行输出从设置或托盘打开。`run.bat --debug` 才显示控制台。
+- 自包含分发版的一键更新位于设置 → 识别与校对。程序只查询固定 GitHub 仓库的最新正式
+  Release，下载同版本 Windows x64 ZIP 与 `.sha256`，通过摘要和压缩包安全检查后才允许安装。
+  更新器等待当前进程退出再覆盖独立运行时，保留 `config.json` 和 `models/llm/`，完成后自动重启。
+  源码开发环境没有 `offline-bundle.txt`，因此只显示说明，不执行自更新。
 
 ### 制作离线分发包
 
@@ -34,7 +38,8 @@ python -m venv .venv
 生成 `dist/voice2text-v0.1.2-windows-x64.zip` 和同名 `.sha256`。
 构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
 
-构建结构检查：`python scripts/check_release.py`。下载回归：
+构建结构检查：`python scripts/check_release.py`。一键更新回归：`python scripts/check_update.py`。
+模型下载回归：
 `python scripts/check_download_models.py` 与 `python scripts/check_model_download.py`。
 最终包还必须在虚拟机独立目录验证，构建检查不能替代实际模型加载与 GUI 验收。
 

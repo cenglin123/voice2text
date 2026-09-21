@@ -122,6 +122,15 @@ CHECKS.append(("发行包", _check_release,
               "python scripts/check_release.py（检查白名单、默认配置、wheel 与 ZIP 布局）"))
 
 
+def _check_update():
+    if not _has_file("voice2text/update.py"):
+        return True, ""
+    return _run("一键更新", ["scripts/check_update.py"])
+
+CHECKS.append(("一键更新", _check_update,
+              "python scripts/check_update.py（检查版本、固定资产、摘要与 ZIP 安全边界）"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="高频完工检查器——无输出即通过")
     ap.add_argument("--quiet", action="store_true",

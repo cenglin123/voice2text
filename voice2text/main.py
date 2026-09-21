@@ -85,7 +85,7 @@ class DictationApp:
         self._cancelled_sessions: set[int] = set()
         self._locked_sentences: list[str] = []
         self.hotkey: HotkeyListener | None = None
-        self.cmd_queue: "queue.Queue[tuple[str, None]]" = queue.Queue()
+        self.cmd_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.ui_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()  # ("state", s) 给 UI
         self.widget_visible = True  # 托盘动态文案用（UI 侧维护）
         self._active = False
@@ -467,6 +467,8 @@ class DictationApp:
         self._inserter.end_session()
         from voice2text.model_download import model_download
         model_download.close()
+        from voice2text.update import update_manager
+        update_manager.close()
         if self._activity_guard is not None:
             self._activity_guard.close()
             self._activity_guard = None
@@ -619,6 +621,9 @@ def _gui_main(output) -> int:
                     ui.settings = SettingsWindow(
                         cfg_dict, app.apply_settings, ui.widget.snapshot(),
                         on_debug=lambda: app.cmd_queue.put(("debug", None)),
+                        on_update=lambda archive, version: app.cmd_queue.put(
+                            ("apply_update", (archive, version))
+                        ),
                     )
                 else:
                     w.root.attributes("-topmost", True)
@@ -636,6 +641,15 @@ def _gui_main(output) -> int:
                     ui.debug = DebugWindow(ui.widget.root, output)
                 else:
                     ui.debug.show()
+            elif cmd == "apply_update":
+                if app._active or app._busy:
+                    print("[更新] 请先等待听写和校对结束")
+                    continue
+                archive, version = payload
+                from voice2text.update import launch_installer
+                launch_installer(archive, version, os.getpid())
+                print(f"[更新] v{version} 已验证，程序即将退出并安装")
+                raise SystemExit
             elif cmd == "quit":
                 raise SystemExit
 
