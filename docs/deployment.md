@@ -31,7 +31,7 @@ python -m venv .venv
 执行 `-I -X utf8 -m pip install --only-binary=:all: --find-links vendor -r requirements.txt`。
 `vendor` 需预先准备固定版本 llama wheel；构建运行时不得使用开发 `.venv` 或系统 Python 的目录副本。
 运行 `python scripts/build_release.py`，从干净运行时与 `models/` 中仅复制基础模型白名单，
-生成 `dist/voice2text-v0.1.0-windows-x64.zip` 和同名 `.sha256`。
+生成 `dist/voice2text-v0.1.2-windows-x64.zip` 和同名 `.sha256`。
 构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
 
 构建结构检查：`python scripts/check_release.py`。下载回归：

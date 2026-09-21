@@ -16,9 +16,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 TEXT_FILES = ("install.bat", "run.bat", "run_gui.pyw", "requirements.txt")
 PACKAGE_FILES = tuple(f"voice2text/{name}.py" for name in (
-    "__init__", "activity", "asr", "capture", "config", "desktop", "hotkey",
-    "input", "keysender", "layered", "main", "model_download", "performance", "proofread",
-    "punctuation", "settings_window", "target", "tray", "tray_menu", "trayicon", "widget",
+    "__init__", "activity", "asr", "capture", "clipboard_tx", "config", "desktop",
+    "diagnostics", "hotkey", "input", "keysender", "layered", "main", "model_download",
+    "performance", "proofread", "punctuation", "settings_window", "target", "tray",
+    "tray_menu", "trayicon", "widget",
 ))
 SCRIPT_FILES = ("scripts/download_models.py", "scripts/verify_install.py")
 FORBIDDEN_PARTS = (".git", ".venv", "__pycache__")

@@ -30,6 +30,16 @@ def main() -> int:
             prefix = f"voice2text-v{_version()}-windows-x64/"
             assert prefix + "install.bat" in names
             assert prefix + "voice2text/main.py" in names
+            source_modules = {
+                path.name for path in (Path(__file__).resolve().parent.parent / "voice2text").glob("*.py")
+            }
+            archived_modules = {
+                Path(name).name for name in names if name.startswith(prefix + "voice2text/")
+            }
+            assert archived_modules == source_modules, (
+                f"发行模块不完整：缺少 {source_modules - archived_modules}，"
+                f"多出 {archived_modules - source_modules}"
+            )
             assert prefix + "vendor/" + wheel.name in names
             assert not any("/.venv/" in name or "/models/" in name or "/runtime/" in name for name in names)
             config = json.loads(archive.read(prefix + "config.json"))
