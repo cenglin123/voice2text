@@ -45,6 +45,8 @@ def main() -> int:
             assert not any("/.venv/" in name or "/models/" in name or "/runtime/" in name for name in names)
             config = json.loads(archive.read(prefix + "config.json"))
             assert config == _default_config()
+            guide = archive.read(prefix + "安装说明.txt").decode("utf-8")
+            assert "https://github.com/cenglin123/voice2text/issues" in guide
             assert archive.testzip() is None
         runtime = root / "runtime"
         runtime.mkdir()
@@ -67,6 +69,8 @@ def main() -> int:
             assert prefix + f"models/punctuation/{PUNCT_NAME}/model.int8.onnx" in names
             assert not any("/llm/" in name or "/vendor/" in name for name in names)
             assert json.loads(archive.read(prefix + "config.json"))["proofread_enabled"] is False
+            guide = archive.read(prefix + "安装说明.txt").decode("utf-8")
+            assert "https://github.com/cenglin123/voice2text/issues" in guide
     print("PASS release allowlist, default config, bundled wheel and archive layout")
     return 0
 

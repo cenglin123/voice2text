@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import types
+from pathlib import Path
 from time import perf_counter_ns
 
 import winsound
@@ -40,6 +41,15 @@ ASR_REQUIRED_FILES = (
     "tokens.txt",
 )
 UI_POLL_MS = 30
+
+
+def resolve_help_document(project_root: Path = PROJECT_ROOT) -> Path:
+    """返回当前运行形态中实际存在的帮助文档。"""
+    for name in ("安装说明.txt", "README.md"):
+        path = project_root / name
+        if path.is_file():
+            return path
+    raise FileNotFoundError("未找到安装说明.txt 或 README.md")
 
 
 def check_models(cfg: AppConfig) -> tuple[bool, str]:
@@ -632,7 +642,10 @@ def _gui_main(output) -> int:
                 if app._active or app._busy:
                     print("[提示] 完成听写和校对后可打开帮助")
                     continue
-                os.startfile(str(PROJECT_ROOT / "README.md"))  # noqa: S606
+                try:
+                    os.startfile(str(resolve_help_document()))  # noqa: S606
+                except OSError as exc:
+                    print(f"[帮助] 无法打开使用帮助：{exc}")
             elif cmd == "debug":
                 if app._active or app._busy:
                     print("[提示] 正在保持输入焦点，完成听写和校对后可查看运行输出")

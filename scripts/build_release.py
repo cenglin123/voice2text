@@ -51,7 +51,9 @@ def _copy_runtime_files(stage: Path) -> None:
         "2. 双击 install.bat，等待依赖和约 1.5GB 模型下载完成。\n"
         "3. 双击 run.bat。程序常驻系统托盘，按 Alt+V 开始或停止听写。\n"
         "4. 调试时运行：run.bat --debug\n\n"
-        "要求：Windows 10/11 x64、麦克风、约 2.5GB 可用空间、安装期间可联网。\n",
+        "要求：Windows 10/11 x64、麦克风、约 2.5GB 可用空间、安装期间可联网。\n\n"
+        "项目主页：https://github.com/cenglin123/voice2text\n"
+        "问题反馈：https://github.com/cenglin123/voice2text/issues\n",
         encoding="utf-8",
     )
 
@@ -131,7 +133,9 @@ def build_release(output_dir: Path, wheel: Path, runtime: Path | None = None,
                 "已包含独立 Python、所有依赖、语音和标点模型，无需系统 Python 或联网。\n"
                 "Alt+V 开始/停止听写；设置 → 识别与校对可联网下载可选校对模型（约 1.1 GB）。\n"
                 "下载完成后开启二次校对并保存；所有识别、标点和校对均在本地执行。\n"
-                "运行输出可从设置或托盘打开。调试启动：run.bat --debug。\n",
+                "运行输出可从设置或托盘打开。调试启动：run.bat --debug。\n\n"
+                "项目主页：https://github.com/cenglin123/voice2text\n"
+                "问题反馈：https://github.com/cenglin123/voice2text/issues\n",
                 encoding="utf-8")
         _validate_stage(stage, offline=runtime is not None)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

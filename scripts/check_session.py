@@ -12,7 +12,7 @@ from voice2text.desktop import RuntimeOutput, SingleInstance
 from voice2text.tray import build_tray, toggle_label
 from pystray._util import win32
 from voice2text.activity import InputActivityGuard
-from voice2text.main import DictationApp, UI_POLL_MS
+from voice2text.main import DictationApp, UI_POLL_MS, resolve_help_document
 from voice2text.config import AppConfig, DEFAULTS
 from voice2text.proofread import Proofreader
 from voice2text.performance import PerformanceRecorder
@@ -62,6 +62,18 @@ class SessionTests(unittest.TestCase):
                 side_effect=lambda value: text(value, self.inserter._check_batch),
             )
         )
+
+    def test_help_document_prefers_packaged_install_guide(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            readme = root / "README.md"
+            guide = root / "安装说明.txt"
+            readme.write_text("source help", encoding="utf-8")
+            self.assertEqual(resolve_help_document(root), readme)
+            guide.write_text("release help", encoding="utf-8")
+            self.assertEqual(resolve_help_document(root), guide)
 
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
