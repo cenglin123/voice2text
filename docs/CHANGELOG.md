@@ -63,6 +63,12 @@
 #### 变更内容
 - 版本提升至 0.1.3，收录 Windows Terminal、热键、剪贴板竞争、跨进程权限检查和临时调试录音清理修复；更新一键更新的下一版本回归夹具。
 
+### 发布 v0.1.3 Windows 自包含版本 [governance]
+
+#### 变更内容
+- GitHub Release v0.1.3 已发布并标记为 Latest，标签指向提交 3398b12；同步 CURRENT、部署说明和 Windows 分发验收证据。
+
+
 
 
 
