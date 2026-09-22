@@ -35,12 +35,11 @@ python -m venv .venv
 执行 `-I -X utf8 -m pip install --only-binary=:all: --find-links vendor -r requirements.txt`。
 `vendor` 需预先准备固定版本 llama wheel；构建运行时不得使用开发 `.venv` 或系统 Python 的目录副本。
 运行 `python scripts/build_release.py`，从干净运行时与 `models/` 中仅复制基础模型白名单，
-生成 `dist/voice2text-v0.1.2-windows-x64.zip` 和同名 `.sha256`。
+生成 `dist/voice2text-v0.1.3-windows-x64.zip` 和同名 `.sha256`。
 构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
 
-GitHub 当前正式发行版为 `v0.1.2`。主分支已包含该发行之后的输入兼容与安全修复，但
-`voice2text.__version__` 仍为 `0.1.2`；制作下一版前必须先提升版本号并重新构建，不能把旧
-`v0.1.2` 资产当作主分支当前代码的验证结果。
+代码版本已提升为 `0.1.3`，用于发布 `v0.1.2` 之后的输入兼容、安全与临时音频清理修复。
+只有重新生成的 `v0.1.3` 资产通过完整校验并上传后，才能把该版本标记为正式发行。
 
 构建结构检查：`python scripts/check_release.py`。一键更新回归：`python scripts/check_update.py`。
 模型下载回归：
