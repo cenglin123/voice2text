@@ -6,7 +6,7 @@ status: investigating
 severity: high
 liveness: active
 last_confirmed: 2026-09-20
-confirmed_count: 5
+confirmed_count: 6
 tags: [WPS, UIA, input-target, native-focus]
 related_files: [voice2text/target.py, scripts/check_session.py]
 verification:
@@ -70,13 +70,15 @@ WPS 复查通过 `GetGUIThreadInfo(0)` 读取当前前台线程队列的真实�
 释放之后；重新绑定快捷键也使用同一触发方式。
 捕获时分别记录顶层 PID/TID 和实际焦点 PID/TID。WPS 会话保持顶层进程在前台，并只接受焦点
 仍属于捕获时顶层进程或编辑进程；其他任意进程仍会立即关闸。
+权限检查同样覆盖顶层进程和实际焦点进程，避免跨进程编辑控件单独提权时被 UIPI 静默丢弃。
 
 ## 验证结果
 
 `python scripts/check_session.py` 通过 56 项测试；回归覆盖三个 WPS 进程在 UIA 不返回控件时
 仍能捕获目标、单元格编辑器焦点转移到同进程另一线程后仍有效，以及未知应用同样情况仍被
 拒绝；另覆盖同进程前台 HWND 切换、焦点短暂为空、原顶层 HWND 被重建的启动窗口，以及热键
-只在组合键释放后回调；新增真实快照结构的跨进程编辑焦点回归。真实 WPS 表格需用当前源码复验。
+只在组合键释放后回调；新增真实快照结构的跨进程编辑焦点回归。另有 10 项权限专项测试覆盖
+焦点进程与顶层进程权限不同的情况。真实 WPS 表格需用当前源码复验。
 
 ## 风险和后续
 
@@ -91,3 +93,4 @@ UIA 文本模式，可恢复更细粒度的控件身份检查。
 - 待提交：WPS 以锁定进程为边界，容忍同进程顶层窗口变化和瞬时空焦点。
 - 待提交：Alt+V 完整释放后再捕获 WPS 输入目标。
 - 待提交：同时锁定 WPS 顶层进程与实际编辑焦点进程。
+- 2026-09-22: 对顶层与焦点 PID 同时执行 UIPI 权限检查。

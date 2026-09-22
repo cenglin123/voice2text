@@ -46,6 +46,7 @@ class InputActivityGuard:
         steps = keyboard.parse_hotkey(combo)
         self._hotkey_groups = [{_user.MapVirtualKeyW(scan, 3) for scan in group} for group in steps[0]]
         self._down = {vk for group in self._hotkey_groups for vk in group if _pressed(vk)}
+        self._hotkey_armed: set[int] = set()
         self._callbacks = [_Hook(self._key), _Hook(self._mouse)]
         self._handles = []
         try:
@@ -64,6 +65,7 @@ class InputActivityGuard:
             if not event.flags & 0x10:
                 if message in (0x101, 0x105):
                     self._down.discard(event.vk)
+                    self._hotkey_armed.discard(event.vk)
                 else:
                     self._down.add(event.vk)
         if code >= 0 and message in (0x100, 0x104) and self.inserter._session_open:
@@ -79,10 +81,17 @@ class InputActivityGuard:
         return _user.CallNextHookEx(None, code, message, pointer)
 
     def _is_hotkey(self, vk: int) -> bool:
-        return any(vk in group for group in self._hotkey_groups) and all(
+        armed = getattr(self, "_hotkey_armed", set())
+        if vk in armed:
+            return True
+        matched = any(vk in group for group in self._hotkey_groups) and all(
             vk in group or any(candidate in self._down for candidate in group)
             for group in self._hotkey_groups
         )
+        if matched:
+            armed.add(vk)
+            self._hotkey_armed = armed
+        return matched
 
     def _mouse(self, code, message, pointer):
         target = self.inserter._target

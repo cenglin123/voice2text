@@ -166,8 +166,7 @@ class TextInserter:
             while common < common_limit and self._current[common] == target[common]:
                 common += 1
             try:
-                self._delete_chars(len(self._current) - common)
-                self._insert_text(target[common:])
+                self._replace_text(len(self._current) - common, target[common:])
             except Exception as exc:  # noqa: BLE001 —— 注入失败：屏幕状态未知，本句脱管
                 self._detached = True
                 self._current = ""
@@ -262,8 +261,9 @@ class TextInserter:
                     self._last_committed_tail = _semantic_tail(replacement)
                 return True
             try:
-                self._delete_chars(sum(len(t) for t in old_span) + len(suffix))
-                self._insert_text(replacement + suffix)
+                self._replace_text(
+                    sum(len(t) for t in old_span) + len(suffix), replacement + suffix
+                )
             except Exception:  # noqa: BLE001
                 # 已删除未重粘：后续句子记账与屏幕失配——为防止连锁错删，
                 # 本会话后续写入一律放弃（比逐句恢复更安全）
@@ -332,11 +332,32 @@ class TextInserter:
         else:
             keysender.send_text(text, guard=self._check_batch)
 
+    def _replace_text(self, delete_count: int, text: str) -> None:
+        """替换尾部文本；剪贴板通道必须先成功发布临时文本，再执行删除。"""
+        self._check_batch()
+        if self._uses_clipboard() and text:
+            if delete_count == 0:
+                self._paste_text(text)
+                return
+            trace("injection", process=self._target_process(), text=text,
+                  transport="protected_clipboard")
+            with temporary_text(text):
+                self._delete_chars(delete_count)
+                self._send_paste_shortcut()
+            return
+        self._delete_chars(delete_count)
+        self._insert_text(text)
+
     def _paste_text(self, text: str) -> None:
         """以不进入 Win+V/云同步的临时剪贴板事务粘贴，并恢复原始全部格式。"""
         self._check_batch()
         trace("injection", process=self._target_process(), text=text,
               transport="protected_clipboard")
+        with temporary_text(text):
+            self._send_paste_shortcut()
+
+    def _send_paste_shortcut(self) -> None:
+        """发送目标应用对应的粘贴快捷键；调用方已准备好临时剪贴板文本。"""
         # Windows Terminal 提供专用的 Ctrl+Shift+V 粘贴绑定；真机已确认当前
         # Ctrl+V 路径会出现按键发送成功但没有文字。这里选用前者以避开终端配置
         # 或 shell/readline 对 Ctrl+V 的接管。微信等 GUI 输入框继续使用 Ctrl+V。
@@ -345,22 +366,21 @@ class TextInserter:
             if self._target_process() == "windowsterminal"
             else ("ctrl",)
         )
-        with temporary_text(text):
-            # 键间必须留间隔：IME 的异步钩子可能把零间隔组合键拆散。
+        # 键间必须留间隔：IME 的异步钩子可能把零间隔组合键拆散。
+        for modifier in reversed(modifiers):
+            keyboard.release(modifier)
+        time.sleep(0.01)
+        self._check_batch()
+        for modifier in modifiers:
+            keyboard.press(modifier)
+        try:
+            time.sleep(0.02)
+            self._check_batch()
+            keyboard.press_and_release("v")
+            time.sleep(0.12)
+        finally:
             for modifier in reversed(modifiers):
                 keyboard.release(modifier)
-            time.sleep(0.01)
-            self._check_batch()
-            for modifier in modifiers:
-                keyboard.press(modifier)
-            try:
-                time.sleep(0.02)
-                self._check_batch()
-                keyboard.press_and_release("v")
-                time.sleep(0.12)
-            finally:
-                for modifier in reversed(modifiers):
-                    keyboard.release(modifier)
 
     def _uses_clipboard(self) -> bool:
         return self._use_clipboard or self._target_process() in _CLIPBOARD_INPUT_APPS

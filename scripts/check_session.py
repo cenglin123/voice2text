@@ -91,6 +91,19 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.inserter.aborted)
         self.assertIn("无法备份当前剪贴板", self.inserter.abort_reason)
 
+    def test_clipboard_refresh_preflight_failure_preserves_existing_text(self):
+        self.destination.process = "windowsterminal"
+        self.screen = "原有识别文字"
+        self.cursor = len(self.screen)
+        self.inserter._current = self.screen
+        with patch(
+            "voice2text.input.temporary_text",
+            side_effect=OSError("无法备份当前剪贴板，已取消本次文字输入"),
+        ), patch("voice2text.input.keyboard.press_and_release") as press:
+            self.assertFalse(self.inserter.replace_current("原有修正文字"))
+        self.assertEqual(self.screen, "原有识别文字")
+        press.assert_not_called()
+
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
         self.inserter.commit_current()
@@ -600,7 +613,7 @@ class DesktopTests(unittest.TestCase):
              patch.object(
                  clipboard_tx.win32clipboard,
                  "GetClipboardSequenceNumber",
-                 side_effect=[7, 7],
+                 return_value=7,
              ):
             with clipboard_tx.temporary_text("测试"):
                 pass
@@ -631,6 +644,7 @@ class DesktopTests(unittest.TestCase):
              patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "CountClipboardFormats", return_value=1), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=7), \
              patch.object(
                  clipboard_tx.pythoncom,
                  "OleGetClipboard",
@@ -645,6 +659,68 @@ class DesktopTests(unittest.TestCase):
                     pass
         publish.assert_not_called()
         empty.assert_not_called()
+
+    def test_clipboard_change_between_snapshot_and_publish_never_overwrites_new_copy(self):
+        original = Mock()
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx, "_snapshot", return_value=(original, 7)), \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=8), \
+             patch.object(clipboard_tx.win32clipboard, "EmptyClipboard") as empty:
+            with self.assertRaisesRegex(OSError, "发生变化"):
+                with clipboard_tx.temporary_text("测试"):
+                    pass
+        empty.assert_not_called()
+
+    def test_partial_clipboard_publish_failure_restores_original(self):
+        original = Mock()
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx, "_snapshot", return_value=(original, 7)), \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", side_effect=[7, 8, 8]), \
+             patch.object(clipboard_tx.win32clipboard, "EmptyClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "SetClipboardText", side_effect=RuntimeError("publish")), \
+             patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore:
+            with self.assertRaisesRegex(OSError, "发布临时剪贴板文本失败"):
+                with clipboard_tx.temporary_text("测试"):
+                    pass
+        restore.assert_called_once_with(original)
+
+    def test_partial_publish_restore_failure_still_reports_actionable_input_error(self):
+        original = Mock()
+        failure = clipboard_tx._PublishError("publish", 8)
+        def fail_restore(_original, sequence):
+            if sequence is not None:
+                raise RuntimeError("restore")
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx, "_snapshot", return_value=(original, 7)), \
+             patch.object(clipboard_tx, "_publish", side_effect=failure), \
+             patch.object(
+                 clipboard_tx, "_restore_if_unchanged",
+                 side_effect=fail_restore,
+             ), \
+             patch.object(clipboard_tx, "trace") as trace:
+            with self.assertRaisesRegex(OSError, "发布临时剪贴板文本失败"):
+                with clipboard_tx.temporary_text("测试"):
+                    pass
+        trace.assert_called_once_with("clipboard_restore_failed", detail="restore")
+
+    def test_external_copy_after_publish_is_never_replaced_by_old_snapshot(self):
+        original = Mock()
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx, "_snapshot", return_value=(original, 7)), \
+             patch.object(clipboard_tx, "_publish", return_value=8), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=9), \
+             patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore:
+            with clipboard_tx.temporary_text("测试"):
+                pass
+        restore.assert_not_called()
 
     def test_empty_clipboard_can_be_used_and_is_restored_empty(self):
         with patch.object(clipboard_tx, "_initialize_ole"), \
@@ -781,6 +857,30 @@ class DesktopTests(unittest.TestCase):
             guard.inserter.abort.assert_not_called()
             emit(0x56, 0x105)
             emit(0xA4, 0x105)
+            emit(0x56, 0x100)
+            guard.inserter.abort.assert_called_once()
+
+    def test_activity_guard_accepts_hotkey_repeat_after_modifier_release(self):
+        import ctypes
+        from voice2text.activity import _Key
+        guard = InputActivityGuard.__new__(InputActivityGuard)
+        guard._hotkey_groups = [{0xA4, 0xA5}, {0x56}]
+        guard._down = set()
+        guard._hotkey_armed = set()
+        guard.inserter = Mock(_session_open=True)
+
+        def emit(vk, message):
+            key = _Key(vk=vk)
+            guard._key(0, message, ctypes.addressof(key))
+
+        with patch("voice2text.activity._pressed", return_value=False), \
+             patch("voice2text.activity._user.CallNextHookEx", return_value=0):
+            emit(0xA4, 0x104)
+            emit(0x56, 0x104)
+            emit(0xA4, 0x105)
+            emit(0x56, 0x100)
+            guard.inserter.abort.assert_not_called()
+            emit(0x56, 0x101)
             emit(0x56, 0x100)
             guard.inserter.abort.assert_called_once()
 

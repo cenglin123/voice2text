@@ -14,13 +14,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from voice2text import target
 
 
-def _capture_stubbed(process: str = "windowsterminal"):
+def _capture_stubbed(process: str = "windowsterminal", focus_identity=(45, 999999)):
     """复用 check_session.TargetTests 的桩思路：只开 Win32 身份，绕过真实桌面。"""
     ctrl = Mock(ControlTypeName="EditControl")
     ctrl.GetRuntimeId.return_value = [1, 2]
     ctrl.GetValuePattern.return_value = None
     with patch.object(target, "foreground", return_value=123), \
-         patch.object(target, "_identity", return_value=(45, 999999)), \
+         patch.object(
+             target, "_identity",
+             side_effect=lambda hwnd: focus_identity if hwnd == 124 else (45, 999999),
+         ), \
          patch.object(target, "_process_name", return_value=process), \
          patch.object(target, "_focus", return_value=124), \
          patch.object(target, "_class", return_value="CASCADIA_HOSTING_WINDOW_CLASS"), \
@@ -52,6 +55,13 @@ class ElevationGuardTests(unittest.TestCase):
         with patch.object(target, "process_elevated", return_value=None), \
              patch.object(target, "self_elevated", return_value=False):
             self.assertTrue(_capture_stubbed().terminal)
+
+    def test_elevated_cross_process_focus_is_rejected(self):
+        with patch.object(
+            target, "process_elevated", side_effect=lambda pid: pid == 888888
+        ), patch.object(target, "self_elevated", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "管理员"):
+                _capture_stubbed("wps", focus_identity=(44, 888888))
 
     def test_process_elevation_open_process_failure_is_unknown(self):
         with patch.object(target._kernel, "OpenProcess", return_value=0), \
@@ -100,7 +110,7 @@ class ElevationGuardTests(unittest.TestCase):
         import ctypes
         is_elevated = ctypes.windll.shell32.IsUserAnAdmin()
         result = target.self_elevated()
-        self.assertIn(result, (bool(is_elevated), None))
+        self.assertIs(result, bool(is_elevated))
 
 
 if __name__ == "__main__":

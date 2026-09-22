@@ -6,7 +6,7 @@ status: mitigated
 severity: high
 liveness: active
 last_confirmed: 2026-09-21
-confirmed_count: 2
+confirmed_count: 3
 tags: [热键, Alt, keyboard, suppress, 输入]
 related_files: [voice2text/hotkey.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -48,6 +48,8 @@ updated_at: 2026-09-21
 切换 Event，没有在操作系统仍报告 Alt 按下时补充 key-up，因此无法修复低级钩子偶发遗漏的
 修饰键释放。热键回调只设置 Event，Tk 主线程原来每 150ms 轮询一次，因此组合键释放后还会
 额外等待 0–150ms 才进入开始或停止流程。
+低级热键监听已经把主键保持在 armed 状态到 key-up，但输入活动守卫仍按“当前修饰键是否按下”
+判断重复的 V；先松 Alt 后 Windows 产生 V repeat 时，会被误判为手动编辑并中断会话。
 
 ## 怎么修复的
 
@@ -56,11 +58,13 @@ key-up；正常物理释放后不发送任何事件。清理发生在主线程�
 并保留原有 `suppress=True` 行为。
 主线程轮询周期从 150ms 调整为 30ms，最坏调度等待缩短 80%；诊断模式记录
 `hotkey_dispatch.latency_ms`，用于区分热键调度和后续识别/校对耗时。
+输入活动守卫同步记录已成立组合键的主键，直到该主键 key-up；期间的自动重复即使发生在 Alt
+释放之后也仍属于停止热键，真正松开后再次单独按 V 才按手动编辑处理。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 59 项测试，覆盖左 Alt 残留时发送一次 key-up、正常
-释放时不注入事件、热键调度延迟计算和不超过 30ms 的轮询上限。真实键盘钩子行为受输入法、
+`python scripts/check_session.py` 通过 74 项测试，覆盖左 Alt 残留时发送一次 key-up、正常
+释放时不注入事件、热键调度延迟计算、先松 Alt 后的 V repeat，以及不超过 30ms 的轮询上限。真实键盘钩子行为受输入法、
 键盘驱动和 Windows 版本影响，仍需在用户的常用应用中连续切换验收。
 
 ## 风险和后续
@@ -72,3 +76,4 @@ Alt+V 热键是期望行为。若仍有残留，应采集运行输出并补充�
 
 - 待提交：为残留 Alt 状态增加主线程 key-up 兜底和回归测试。
 - 待提交：将热键轮询周期降至 30ms，并增加调度延迟诊断。
+- 2026-09-22: 活动守卫沿用 armed 主键状态，避免热键自动重复被误判为手动编辑。

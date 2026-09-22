@@ -174,18 +174,20 @@ class InputTarget:
         process = _process_name(pid)
         if not process or process in blacklist:
             raise RuntimeError("目标进程无法验证或已被禁止输入")
-        # UIPI：非提权进程向管理员窗口注入的按键会被系统静默丢弃——识别、
-        # 剪贴板、SendInput 全部"成功"，终端却一个字都不出现（见 pitfalls.md）。
-        # 捕获阶段直接拒绝并给出可执行的指引，好过让用户对着空终端排查。
-        if process_elevated(pid) and self_elevated() is False:
-            raise RuntimeError(
-                f"目标窗口（{process}）以管理员权限运行，普通权限的本软件无法向它输入文字。"
-                "请右键以管理员身份重新启动本软件，或改用非管理员窗口听写。"
-            )
         focus = _focus(tid)
         if not focus:
             raise RuntimeError("无法确定目标输入控件")
         focus_tid, focus_pid = _identity(focus)
+        # WPS 等应用的顶层窗口与实际编辑控件可能属于不同进程。两个 PID 都要
+        # 检查，否则焦点子进程提权时仍会被 UIPI 静默拦截。
+        if self_elevated() is False and any(
+            process_elevated(candidate) is True
+            for candidate in {pid, focus_pid} if candidate
+        ):
+            raise RuntimeError(
+                f"目标窗口（{process}）以管理员权限运行，普通权限的本软件无法向它输入文字。"
+                "请右键以管理员身份重新启动本软件，或改用非管理员窗口听写。"
+            )
         window_class = _class(hwnd)
         # Windows Terminal 的顶层宿主类会随系统版本、启动方式和窗口状态变化；
         # 进程名比 XAML 宿主窗口类稳定，二者任一命中即可走终端原生焦点路径。
