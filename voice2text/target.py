@@ -40,10 +40,19 @@ _user.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
 _user.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 _user.GetAncestor.restype = wintypes.HWND
 _kernel.GetCurrentThreadId.restype = wintypes.DWORD
+_kernel.GetCurrentProcess.restype = wintypes.HANDLE
 _kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 _kernel.OpenProcess.restype = wintypes.HANDLE
 _kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
 _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+
+_advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+_advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+_advapi.OpenProcessToken.restype = wintypes.BOOL
+_advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+_advapi.GetTokenInformation.restype = wintypes.BOOL
+_TOKEN_QUERY = 0x8
+_TokenElevation = 20
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
 _TERMINAL_APPS = {"windowsterminal"}
@@ -94,6 +103,49 @@ def _process_name(pid: int) -> str:
         _kernel.CloseHandle(handle)
 
 
+def _token_elevation(handle: int) -> bool | None:
+    """读取进程令牌的提权状态；查询失败返回 None。"""
+    token = wintypes.HANDLE()
+    if not _advapi.OpenProcessToken(handle, _TOKEN_QUERY, ctypes.byref(token)):
+        return None
+    try:
+        value = wintypes.DWORD()
+        got = wintypes.DWORD()
+        if not _advapi.GetTokenInformation(
+            token, _TokenElevation, ctypes.byref(value),
+            ctypes.sizeof(value), ctypes.byref(got),
+        ):
+            return None
+        return bool(value.value)
+    finally:
+        # OpenProcessToken 返回的是真实令牌句柄，始终由本函数关闭；传入的
+        # 进程句柄归调用方所有（GetCurrentProcess 还可能是不可关闭的伪句柄）。
+        _kernel.CloseHandle(token)
+
+
+def self_elevated() -> bool | None:
+    """本进程是否以管理员令牌运行（未知时 None，调用方应放行而非拦截）。"""
+    return _token_elevation(_kernel.GetCurrentProcess())
+
+
+def process_elevated(pid: int) -> bool | None:
+    """目标进程是否以管理员令牌运行。
+
+    非提权进程拿不到提权目标的令牌（ACCESS_DENIED）——此时保守视为提权，
+    只用于拦截"自己非提权 + 目标提权"的组合，不用于其他放行判断。
+    """
+    handle = _kernel.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        elevation = _token_elevation(handle)
+        if elevation is None:
+            return True  # 令牌打不开：目标权限高于本进程
+        return elevation
+    finally:
+        _kernel.CloseHandle(handle)
+
+
 @dataclass(frozen=True)
 class InputTarget:
     hwnd: int
@@ -116,6 +168,14 @@ class InputTarget:
         process = _process_name(pid)
         if not process or process in blacklist:
             raise RuntimeError("目标进程无法验证或已被禁止输入")
+        # UIPI：非提权进程向管理员窗口注入的按键会被系统静默丢弃——识别、
+        # 剪贴板、SendInput 全部"成功"，终端却一个字都不出现（见 pitfalls.md）。
+        # 捕获阶段直接拒绝并给出可执行的指引，好过让用户对着空终端排查。
+        if process_elevated(pid) and self_elevated() is False:
+            raise RuntimeError(
+                f"目标窗口（{process}）以管理员权限运行，普通权限的本软件无法向它输入文字。"
+                "请右键以管理员身份重新启动本软件，或改用非管理员窗口听写。"
+            )
         focus = _focus(tid)
         if not focus:
             raise RuntimeError("无法确定目标输入控件")

@@ -6,7 +6,7 @@
 ## Windows
 
 - **sounddevice 回调缓冲区仅在回调返回前有效**：`indata` 是 PortAudio 内部缓冲区的视图，入队必须 `copy()`；单声道时 `np.ascontiguousarray(indata[:, 0])` 返回视图不拷贝，是隐蔽的悬垂引用。规避：显式 `.copy()`（官方示例 rec_unlimited.py 同款写法）。
-- **向提权窗口粘贴会被 UIPI 静默吞掉但 UIA 查不到差异**：非提权进程对管理员窗口 SendInput 被吞、copy 成功，记账会记下屏幕上不存在的字，后续可能多退格吃掉用户文本。盲粘贴方案固有风险，用户验收观察项；根除需程序提权。
+- **向提权窗口注入会被 UIPI 静默吞掉，但识别、剪贴板和 SendInput 全部"成功"**：非提权进程对管理员窗口的 SendInput 被系统丢弃、OpenClipboard 照常成功，所有性能指标 ok，目标窗口却一个字不出现——日志完全无法区分"输入成功"和"被吞"。内置 Administrator 账户若开启 FilterAdministratorToken，本软件默认也是普通权限，而"终端(管理员)"是提权实例，属于必现场景。规避：捕获目标阶段比对两侧令牌提权状态，失配即拒绝开始并指引以管理员重启；根除注入本身仍需程序提权。
 - **焦点切出编辑框后同句继续粘贴会重复上屏**：partial 已在框内，焦点切回后若继续整句刷新会再贴一遍。规避：脱管机制——焦点离开后本句剩余 partial 全部跳过（牺牲脱管句后半段，保记账正确）。
 - **键盘事件注入在开发沙箱中不可靠**：ZCode 沙箱会话里 keybd_event/SendInput 注入的按键大部分事件丢失、原生 ctypes 低级钩子安装失败——keyboard 库代码本身正常。规避：热键相关自动化测试只测状态机（直接调回调），真人按键验证放用户验收。
 - **PowerShell 5.1 读 UTF-8 脚本需 BOM**：无 BOM 的 UTF-8 ps1 会被按 GBK 解析成乱码。规避：`encoding='utf-8-sig'` 写 ps1；另注意 Windows python 与 Git Bash 的 `/tmp` 不是同一目录，跨工具传文件用显式 Windows 路径。

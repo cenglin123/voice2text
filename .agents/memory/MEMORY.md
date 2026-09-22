@@ -8,14 +8,14 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-22 18:19
+> 最近重建：2026-09-22 20:27
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
-- [热键主键透传导致输入框出现 v 或控制字符](../../docs/problems/bugfix/ime-vmode-text-vanish.md) — mitigated · high · active · 更新于 2026-09-18
 - [Windows Terminal / OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — mitigated · high · active · 更新于 2026-09-22
+- [热键主键透传导致输入框出现 v 或控制字符](../../docs/problems/bugfix/ime-vmode-text-vanish.md) — mitigated · high · active · 更新于 2026-09-18
 - [设置快捷键时修饰键捕获错误](../../docs/problems/bugfix/settings-modifier-capture.md) — fixed · medium · active · 更新于 2026-09-21
 - [分发版使用帮助仍尝试打开未打包的 README](../../docs/problems/bugfix/release-help-document-missing.md) — fixed · low · active · 更新于 2026-09-21
 - [微信富文本输入框会话中断与锁句标点误覆盖](../../docs/problems/bugfix/weixin-volatile-input-and-punctuation-gate.md) — investigating · high · active · 更新于 2026-09-21

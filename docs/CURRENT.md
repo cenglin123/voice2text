@@ -36,7 +36,12 @@ v0.1.2 在 Windows Terminal 中的二次真机日志确认两处问题：宿主�
 源码现以 `windowsterminal` 进程名兜底终端身份，并为其发送 Ctrl+Shift+V；相关目标捕获、
 传输路由和组合键回归测试已补齐。分发端进一步确认旧热键监听会把 Alt+V / Ctrl+Alt+X
 的主键泄漏为 `v` / `^X`；现改为主键 down/up 全程阻断、松键单次触发的独立状态机。
-64 项会话测试通过，等待直接替换分发端源码后的真机复验。
+64 项会话测试通过。随后真机实锤根因：本机开启 FilterAdministratorToken，本软件 pythonw
+非提权而用户终端为提权实例，UIPI 静默丢弃 SendInput（识别/剪贴板/注入全部 ok 但无文字）。
+捕获阶段已加提权失配检测：非提权本软件对管理员窗口直接拒绝开始并给出管理员重启指引；
+`scripts/check_elevation_guard.py` 8 项与仓库 `check_session.py` 64 项全部通过。
+等待用户复验：管理员终端应出现拒绝提示，非提权终端应正常上屏（若仍无文字，下一杠杆
+是把终端粘贴组合键换成 shift+insert）。
 
 ## 当前模式
 
