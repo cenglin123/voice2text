@@ -5,6 +5,8 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+import keyboard
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from voice2text import target, keysender, clipboard_tx
 from voice2text.input import TextInserter
@@ -612,12 +614,46 @@ class DesktopTests(unittest.TestCase):
                 pass
         trace.assert_called_once_with("clipboard_restore_failed", detail="restore")
 
-    def test_hotkey_toggles_only_after_combo_release(self):
-        with patch("voice2text.hotkey.keyboard.add_hotkey", return_value="hook") as add:
+    def test_hotkey_blocks_main_key_until_release_without_leaking_to_terminal(self):
+        callbacks = []
+        remove = Mock()
+        with patch(
+            "voice2text.hotkey.keyboard.parse_hotkey_combinations",
+            return_value=(((56, 47),),),
+        ), patch(
+            "voice2text.hotkey.keyboard.is_modifier",
+            side_effect=lambda code: code == 56,
+        ), patch(
+            "voice2text.hotkey.keyboard.hook",
+            side_effect=lambda callback, suppress: callbacks.append((callback, suppress)) or remove,
+        ):
             listener = HotkeyListener("alt+v")
-        add.assert_called_once_with(
-            "alt+v", listener._on_hotkey, suppress=True, trigger_on_release=True
-        )
+        callback, suppress = callbacks[0]
+        self.assertTrue(suppress)
+        self.assertTrue(callback(Mock(scan_code=56, event_type=keyboard.KEY_DOWN)))
+        self.assertFalse(callback(Mock(scan_code=47, event_type=keyboard.KEY_DOWN)))
+        self.assertFalse(listener.toggle_event.is_set())
+        self.assertFalse(callback(Mock(scan_code=47, event_type=keyboard.KEY_UP)))
+        self.assertTrue(listener.toggle_event.is_set())
+        self.assertTrue(callback(Mock(scan_code=56, event_type=keyboard.KEY_UP)))
+
+    def test_hotkey_main_key_without_modifier_passes_through(self):
+        callbacks = []
+        with patch(
+            "voice2text.hotkey.keyboard.parse_hotkey_combinations",
+            return_value=(((56, 47),),),
+        ), patch(
+            "voice2text.hotkey.keyboard.is_modifier",
+            side_effect=lambda code: code == 56,
+        ), patch(
+            "voice2text.hotkey.keyboard.hook",
+            side_effect=lambda callback, suppress: callbacks.append(callback) or Mock(),
+        ):
+            listener = HotkeyListener("alt+v")
+        callback = callbacks[0]
+        self.assertTrue(callback(Mock(scan_code=47, event_type=keyboard.KEY_DOWN)))
+        self.assertTrue(callback(Mock(scan_code=47, event_type=keyboard.KEY_UP)))
+        self.assertFalse(listener.toggle_event.is_set())
 
     def test_slow_unicode_input_holds_each_code_unit_before_keyup(self):
         with patch.object(keysender, "_flush") as flush, \

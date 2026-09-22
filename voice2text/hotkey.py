@@ -50,11 +50,51 @@ class HotkeyListener:
         self._toggle_event = threading.Event()
         self._last_press = threading.Event()
         self._last_trigger_ns = 0
-        # suppress=True：吞掉 Alt+V，不再透传给焦点应用。中文输入法激活时，
-        # 透传的 v 会进入拼音组合框并弹出 v 模式面板（实测 bug），必须拦截。
-        self._hook = keyboard.add_hotkey(
-            combo, self._on_hotkey, suppress=True, trigger_on_release=True
-        )
+        self._hook = self._register_blocking_hotkey(combo)
+
+    def _register_blocking_hotkey(self, combo: str):
+        """阻断组合键主键的 down/up，并在主键松开时只触发一次。
+
+        keyboard.add_hotkey 的 trigger_on_release 抑制依赖库内修饰键重放状态机；
+        Windows Terminal 真机可收到漏出的 v / Ctrl+X。这里独立跟踪物理扫描码，
+        修饰键照常通过，只有完整组合中的主键被吞掉。
+        """
+        steps = keyboard.parse_hotkey_combinations(combo)
+        if len(steps) != 1:
+            raise ValueError("快捷键只支持单组按键组合")
+        combinations = tuple(frozenset(codes) for codes in steps[0])
+        main_by_combination = {
+            codes: frozenset(code for code in codes if not keyboard.is_modifier(code))
+            for codes in combinations
+        }
+        if not combinations or any(len(main) != 1 for main in main_by_combination.values()):
+            raise ValueError("快捷键必须包含一个非修饰键")
+
+        down: set[int] = set()
+        armed: set[int] = set()
+
+        def block(event) -> bool:
+            scan_code = int(event.scan_code)
+            if event.event_type == keyboard.KEY_DOWN:
+                down.add(scan_code)
+                matched_main = any(
+                    codes.issubset(down) and scan_code in main_by_combination[codes]
+                    for codes in combinations
+                )
+                if matched_main:
+                    armed.add(scan_code)
+                    return False
+                return True
+
+            was_armed = scan_code in armed
+            down.discard(scan_code)
+            if was_armed:
+                armed.discard(scan_code)
+                self._on_hotkey()
+                return False
+            return True
+
+        return keyboard.hook(block, suppress=True)
 
     def _on_hotkey(self) -> None:
         self._last_trigger_ns = perf_counter_ns()
@@ -95,13 +135,11 @@ class HotkeyListener:
     def rebind(self, combo: str) -> None:
         """更换热键组合（设置窗口保存时调用）。失败时抛异常由调用方提示。"""
         old = self._hook
-        self._hook = keyboard.add_hotkey(
-            combo, self._on_hotkey, suppress=True, trigger_on_release=True
-        )
+        self._hook = self._register_blocking_hotkey(combo)
         self._combo = combo
         try:
-            keyboard.remove_hotkey(old)
-        except (KeyError, ValueError):
+            old()
+        except (KeyError, ValueError, TypeError):
             pass
 
     @property
@@ -110,6 +148,6 @@ class HotkeyListener:
 
     def shutdown(self) -> None:
         try:
-            keyboard.remove_hotkey(self._hook)
-        except (KeyError, ValueError):
+            self._hook()
+        except (KeyError, ValueError, TypeError):
             pass  # 进程退出时钩子可能已被清理

@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-22 18:11
+> 最近重建：2026-09-22 18:19
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [热键主键透传导致输入框出现 v 或控制字符](../../docs/problems/bugfix/ime-vmode-text-vanish.md) — mitigated · high · active · 更新于 2026-09-18
 - [Windows Terminal / OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — mitigated · high · active · 更新于 2026-09-22
 - [设置快捷键时修饰键捕获错误](../../docs/problems/bugfix/settings-modifier-capture.md) — fixed · medium · active · 更新于 2026-09-21
 - [分发版使用帮助仍尝试打开未打包的 README](../../docs/problems/bugfix/release-help-document-missing.md) — fixed · low · active · 更新于 2026-09-21
@@ -30,7 +31,6 @@
 - [毛玻璃悬浮窗圆角锯齿与角落蓝底](../../docs/problems/bugfix/widget-glass-corners.md) — fixed · medium · active · 更新于 2026-09-19
 - [悬浮窗拖动时 ULW 旧坐标撤销 Tk 移动](../../docs/problems/bugfix/widget-drag-position.md) — fixed · medium · active · 更新于 2026-09-18
 - [设置页缩放滑条无法达到配置支持的范围](../../docs/problems/bugfix/settings-slider-range.md) — fixed · low · active · 更新于 2026-09-18
-- [听写中途已识别文字全部消失并弹出输入法 v 模式面板](../../docs/problems/bugfix/ime-vmode-text-vanish.md) — fixed · high · active · 更新于 2026-09-18
 <!-- memory-index:end -->
 
 ## 记忆规则
