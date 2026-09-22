@@ -75,6 +75,13 @@ class SessionTests(unittest.TestCase):
             guide.write_text("release help", encoding="utf-8")
             self.assertEqual(resolve_help_document(root), guide)
 
+    def test_windows_terminal_uses_protected_clipboard_transport(self):
+        self.destination.process = "windowsterminal"
+        self.send_text.reset_mock()
+        self.assertTrue(self.inserter.replace_current("终端输入"))
+        self.paste_text.assert_called_once_with("终端输入")
+        self.send_text.assert_not_called()
+
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
         self.inserter.commit_current()

@@ -25,7 +25,7 @@ from voice2text.diagnostics import trace
 _ASCII_WORD_TAIL = re.compile(r"[A-Za-z0-9]$")
 _TRAILING_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:\"'”’」』）)】]+$")
 _INSERTABLE_PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
-_CLIPBOARD_INPUT_APPS = {"weixin"}
+_CLIPBOARD_INPUT_APPS = {"weixin", "windowsterminal"}
 _NO_PROOFREAD_REWRITE_APPS = {"weixin"}
 
 
