@@ -28,7 +28,7 @@
 
 ## 当前验证
 
-- `scripts/check_session.py`：74 项通过。
+- `scripts/check_session.py`：75 项通过。
 - `scripts/check_elevation_guard.py`：10 项通过。
 - `python scripts/check_all.py --quiet`：通过；包含治理同步、发行结构、一键更新、会话与权限检查。
 - 自动检查只使用模拟目标或脚本自建窗口。微信、WPS、Windows Terminal、麦克风和不同权限
@@ -39,7 +39,6 @@
 1. 用当前源码复验非提权 Windows Terminal、微信连续 partial、WPS 表格单元格及连续热键切换。
 2. 真机通过后提升版本号，重建自包含 ZIP/SHA-256，并发布包含这些修复的新版本。
 3. 继续 Windows 10 虚拟机的 GUI、真实听写和可选校对模型下载验收。
-4. 清理退出时可能遗留的 `debug_capture.wav`，满足临时音频退出清理约束。
 
 ## 已知取舍
 

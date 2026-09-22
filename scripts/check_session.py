@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import keyboard
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from voice2text import target, keysender, clipboard_tx
+from voice2text import target, keysender, clipboard_tx, capture
 from voice2text.input import TextInserter
 from voice2text.desktop import RuntimeOutput, SingleInstance
 from voice2text.tray import build_tray, toggle_label
@@ -76,6 +76,19 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(resolve_help_document(root), readme)
             guide.write_text("release help", encoding="utf-8")
             self.assertEqual(resolve_help_document(root), guide)
+
+    def test_debug_audio_is_removed_on_startup_and_cleanup(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            debug_path = Path(tmp) / "debug_capture.wav"
+            debug_path.write_bytes(b"stale microphone data")
+            with patch.object(capture, "DEBUG_CAPTURE_PATH", debug_path):
+                recorder = capture.MicrophoneCapture(debug_dump_wav=True)
+                self.assertFalse(debug_path.exists())
+                debug_path.write_bytes(b"current microphone data")
+                recorder.cleanup_debug_dump()
+                self.assertFalse(debug_path.exists())
 
     def test_windows_terminal_uses_protected_clipboard_transport(self):
         self.destination.process = "windowsterminal"

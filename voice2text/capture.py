@@ -21,6 +21,7 @@ from voice2text.config import PROJECT_ROOT
 TARGET_RATE = 16000
 _BLOCK_SIZE = 4000  # 约 0.25s @16kHz，识别粒度够细且回调开销小
 WATCHDOG_SECONDS = 3.0  # 会话中超过此时长无回调视为设备无响应/断开
+DEBUG_CAPTURE_PATH = (PROJECT_ROOT / "debug_capture.wav").absolute()
 
 
 class CaptureError(RuntimeError):
@@ -59,6 +60,7 @@ class MicrophoneCapture:
         self._error: str | None = None
         self._last_audio = 0.0
         self.queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self.cleanup_debug_dump()  # 清除上次异常退出可能留下的麦克风音频
 
     @property
     def error(self) -> str | None:
@@ -67,6 +69,13 @@ class MicrophoneCapture:
     def seconds_since_audio(self) -> float:
         """距上次回调的秒数。会话进行中该值持续增长即为设备无响应（如中途拔出）。"""
         return time.monotonic() - self._last_audio
+
+    def cleanup_debug_dump(self) -> None:
+        """删除落盘调试音频；失败时记录错误，避免退出流程崩溃。"""
+        try:
+            DEBUG_CAPTURE_PATH.unlink(missing_ok=True)
+        except OSError as exc:
+            self._error = self._error or f"清理调试录音失败：{exc}"
 
     def start(self) -> None:
         """开始采集。设备打不开时抛 CaptureError（信息含可用设备列表）。"""
@@ -155,7 +164,7 @@ class MicrophoneCapture:
         if not chunks:
             return None
         audio = np.concatenate(chunks)
-        path = (PROJECT_ROOT / "debug_capture.wav").absolute()
+        path = DEBUG_CAPTURE_PATH
         with wave.open(str(path), "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)

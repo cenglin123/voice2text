@@ -484,6 +484,7 @@ class DictationApp:
             self._activity_guard = None
         self._session_gen += 1
         self._capture.stop()
+        self._capture.cleanup_debug_dump()
         if self.hotkey is not None:
             self.hotkey.shutdown()
         if self._worker is not None:
