@@ -13,7 +13,7 @@
 Alt+V（keyboard 全局热键，常驻后台）
   → sounddevice 采集麦克风 PCM → 环形缓冲
   → sherpa-onnx 流式识别线程（增量文本回调）
-  → input 模块：检测焦点控件可编辑 → SendInput Unicode 注入光标处（实时上屏）
+  → input 模块：锁定输入目标 → 默认 SendInput Unicode；微信/Windows Terminal 用受保护粘贴
   → 停顿检测（0.8s）→ sherpa-onnx 标点模型只插入标点并锁句
   → Alt+V 停止 → proofread 模块用 Qwen GGUF 统一校对
      → 用校对结果替换本次已上屏文本
@@ -22,7 +22,7 @@ Alt+V（keyboard 全局热键，常驻后台）
 关键不变量：
 - 识别线程与校对推理不得阻塞音频采集与热键响应（各自独立线程）
 - 校对替换必须精确知道"刚才上屏了哪些字"，上屏文本与替换文本由同一模块记账
-- 光标位置不可输入时，一切写入操作静默跳过（不弹窗、不粘贴）
+- 捕获、焦点恢复或权限验证失败时关闭本次写入，并给出可执行的状态说明
 
 ## 关键设计决策
 
@@ -46,13 +46,14 @@ Alt+V（keyboard 全局热键，常驻后台）
 ### 上屏为什么默认用 SendInput Unicode 注入
 - 初版方案是剪贴板 + Ctrl+V（规避输入法对普通键击的转义），但 Windows 剪贴板历史（Win+V）会积累每一次 partial 刷新的文本（用户实测不可接受），且与用户剪贴板存在保存/恢复竞态
 - 现方案：SendInput KEYEVENTF_UNICODE（VK_PACKET）把字符作为键盘事件直发光标处，绕过输入法组合、不经剪贴板；KeePass 等自动输入工具的标准做法
-- 微信 Qt 输入框会错误接收 VK_PACKET，partial 变化尾部和标点改用受保护剪贴板事务：临时内容声明不进入 Win+V/云同步，粘贴后仅在剪贴板序号未变化时恢复原始全部格式；用户同时复制的新内容优先保留
+- 微信 Qt 输入框会错误接收 VK_PACKET，partial 变化尾部和标点改用受保护剪贴板事务；Windows Terminal 同样使用该事务并发送 Ctrl+Shift+V
+- 临时内容声明不进入 Win+V/云同步。事务以 clipboard sequence 校验快照、发布和恢复边界；替换已有文字时先成功备份并发布，再删除旧字。用户同时复制的新内容优先保留
 - 兜底：其他不认 VK_PACKET 的应用可用 `config.input_clipboard=true` 使用同一受保护剪贴板路径（Ctrl+V 键间留有间隔，防 IME 异步钩子拆散组合键）
 
 ### 可编辑检测为什么用 UIAutomation
 - pyautogui/pyperclip 没有 UI 元素内省能力，判断不了"光标是否在可编辑控件"
 - Windows 可靠路径是 UIA：`uiautomation` 取焦点控件，ControlType ∈ {Edit, Document} 或 ValuePattern 可写
-- 取舍：UIA 对自绘控件（部分 Qt/Electron/游戏）覆盖不全——查不到控件时默认允许粘贴，config 黑名单可关停指定进程
+- 取舍：UIA 对自绘控件覆盖不全。未知应用验证失败时拒绝开始；只有 Windows Terminal 与 WPS 套件走经过回归覆盖的原生焦点路径，config 黑名单可继续关停指定进程
 
 ### 流式 partial 为什么只替换变化尾部
 - sherpa-onnx `get_result()` 返回当前句累计假设文本，解码中尾部会自我修正（非单调追加），当增量逐次粘贴会出现重复错乱
@@ -75,6 +76,13 @@ Alt+V（keyboard 全局热键，常驻后台）
 ### 悬浮窗原生模糊为何保留回退
 
 Windows 10 原生合成模糊通过 `SetWindowCompositionAttribute` 的 ACCENT_ENABLE_BLURBEHIND 与 ULW 半透明表面组合，不需要升级 GUI 框架或抓取桌面。该接口非公开，因此按能力探测；远程桌面、高对比或系统透明效果关闭时回退深蓝绘制。圆角区域交给系统裁剪，避免透明角外出现矩形模糊背景。当前真机验证覆盖 Windows 10 19045；Windows 11 尚待实机验证。
+
+### 为什么桌面层保留轻量原生组合
+
+- 设置页使用标准库 Tkinter，悬浮窗由 Pillow 超采样绘制后通过 pywin32 提交分层窗口，托盘
+  生命周期使用 pystray；不引入 Chromium 或独立 Web 前端运行时
+- 该组合能随自包含 Python 一起分发，并直接使用 Win32 焦点、剪贴板、模糊和逐像素透明能力
+- 取舍是 Windows 行为需要真机覆盖，DPI、窗口合成和不同权限级别不能只靠无界面测试证明
 
 ### 为什么自更新由独立进程应用
 

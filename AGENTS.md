@@ -34,7 +34,7 @@ voice2text：Windows 桌面语音听写工具。按下 Alt+V 开始/停止听写
 
 - **用户**：中文交流；关注可分发性（自包含、一键安装）与最终用户体验
 - **项目上下文**：voice2text 处于从零开发阶段，技术选型已定（sherpa-onnx 流式识别 + Qwen GGUF 校对 + llama-cpp-python）
-- **最近教训**：① llama-cpp-python 在 PyPI 只有 sdist、无任何 wheel——Windows wheel 仅在作者索引 abetlen.github.io/llama-cpp-python/whl/cpu/，装依赖必须带 `--extra-index-url`；② sherpa-onnx 1.13.x 的 Python 模块名是 `sherpa_onnx`（旧 `sherpa.onnx` 已废弃）；③ embeddable Python 的 `._pth` 隔离模式不含 cwd，须在 `._pth` 追加项目根 + 设 `PYTHONNOUSERSITE=1`；④ sherpa-onnx funasr-nano int8 版有转写重复问题（issue #3066），避开 int8；⑤ 合成按键三坑：全局热键必须 suppress 不透传（v 会进拼音组合框）；普通键击会被输入法转义——上屏用 VK_PACKET Unicode 注入（剪贴板路径会污染 Win+V 历史且与用户剪贴板竞态，仅作兜底）；走剪贴板路径时 Ctrl+V 键间须加间隔
+- **最近教训**：① llama-cpp-python 在 PyPI 只有 sdist、无任何 wheel——Windows wheel 仅在作者索引 abetlen.github.io/llama-cpp-python/whl/cpu/，装依赖必须带 `--extra-index-url`；② sherpa-onnx 1.13.x 的 Python 模块名是 `sherpa_onnx`（旧 `sherpa.onnx` 已废弃）；③ embeddable Python 的 `._pth` 隔离模式不含 cwd，须在 `._pth` 追加项目根 + 设 `PYTHONNOUSERSITE=1`；④ sherpa-onnx funasr-nano int8 版有转写重复问题（issue #3066），避开 int8；⑤ 全局热键主键必须从命中到 key-up 全程 suppress；默认上屏用 VK_PACKET，微信与 Windows Terminal 改用带历史/云同步排除标记的受保护剪贴板事务，事务必须先稳定备份并发布临时文本，再删除待替换正文；Windows Terminal 使用 Ctrl+Shift+V
 - **详细记忆**：[.agents/memory/MEMORY.md](.agents/memory/MEMORY.md)
 
 > 维护细节（写入触发、touch 规范、索引重建）见 MEMORY.md 和 `python scripts/maintain.py`。
@@ -62,7 +62,7 @@ Bugfix 任务（修复 / bug / 报错 / 异常等）必须先查索引段的 bug
 - **本地推理**：识别、标点、校对不得调用云端推理 API。基础分发包自带运行时、依赖和语音/标点模型；模型下载只允许安装期或用户在设置中显式发起的可选校对模型安装，使用固定来源。
 - **模型文件不入库**：`models/` 目录（sherpa-onnx 模型、Qwen GGUF，体积大）不进 git，由安装脚本下载
 - **一键安装**：`install.bat` 必须能从干净 Windows 机器拉起完整环境（venv + 依赖 + 模型），破坏此性质即破坏核心需求
-- **全局热键 Alt+V**：keyboard 库普通权限即可装钩子；仅焦点在管理员权限窗口时收不到热键（UIPI 限制）。不做默认提权，首次启动自检引导（详见 docs/pitfalls.md）
+- **全局热键 Alt+V**：keyboard 库普通权限即可装钩子；非提权程序向管理员窗口注入会受 UIPI 拦截，捕获阶段必须拒绝权限失配目标。不做默认提权（详见 docs/pitfalls.md）
 
 ### 默认偏好（有充分理由可偏离）
 

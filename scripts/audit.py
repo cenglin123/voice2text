@@ -88,6 +88,14 @@ MANIFEST_GLOBS = [
 # should extend or replace these patterns for their specific stack. The --json output
 # leaves interpretation to the agent, not the dictionary.
 DRIFT_PATTERNS: dict[str, list[str]] = {
+    "sherpa-onnx":       ["sherpa-onnx", "sherpa_onnx"],
+    "llama-cpp-python":  ["llama-cpp-python", "llama_cpp"],
+    "sounddevice":       ["sounddevice"],
+    "keyboard":          ["keyboard"],
+    "UIAutomation":      ["uiautomation"],
+    "pywin32":           ["pywin32", "win32clipboard", "pythoncom"],
+    "pystray":           ["pystray"],
+    "Pillow":            ["pillow", "pil"],
     "SQLite":            ["sqlite", "aiosqlite", "better-sqlite3", "sql.js"],
     "PostgreSQL":        ["postgres", "postgresql", "psycopg2", "psycopg", "pg", "pg-promise"],
     "MySQL":             ["mysql", "mariadb", "pymysql", "mysql2"],

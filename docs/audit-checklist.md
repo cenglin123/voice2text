@@ -50,3 +50,6 @@
 ## 审计记录
 
 <!-- 每次完成审计后在此追加一条记录，格式：YYYY-MM-DD — 审计摘要（发现/修复/遗留） -->
+- 2026-09-22 — 首次完整审计。修正 CURRENT 的发行态、输入通道、UIPI、持久化数据和下一版
+  边界；为 sherpa-onnx、llama-cpp-python、桌面输入与 GUI 依赖增加漂移检测并补齐设计说明。
+  机械检查无遗留；微信、WPS、Windows Terminal 与 VM 仍按 CURRENT 进行真机验收。

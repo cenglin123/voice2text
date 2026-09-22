@@ -38,6 +38,10 @@ python -m venv .venv
 生成 `dist/voice2text-v0.1.2-windows-x64.zip` 和同名 `.sha256`。
 构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
 
+GitHub 当前正式发行版为 `v0.1.2`。主分支已包含该发行之后的输入兼容与安全修复，但
+`voice2text.__version__` 仍为 `0.1.2`；制作下一版前必须先提升版本号并重新构建，不能把旧
+`v0.1.2` 资产当作主分支当前代码的验证结果。
+
 构建结构检查：`python scripts/check_release.py`。一键更新回归：`python scripts/check_update.py`。
 模型下载回归：
 `python scripts/check_download_models.py` 与 `python scripts/check_model_download.py`。
@@ -45,10 +49,12 @@ python -m venv .venv
 
 ## 持久化与备份
 
-无用户数据持久化。`models/`（约 1.5–2GB）与 `runtime/`（python-build-standalone CPython，约 40MB 压缩 / ~130MB 解压）为可重建目录，删除后重跑 `install.bat` 可恢复。
+用户设置持久化在程序目录的 `config.json`，可选校对模型位于 `models/llm/`；一键更新会保留
+两者。语音/标点模型与 `runtime/` 可由安装或发行包重建。构建和提交必须排除个人
+`config.json`、全部模型文件和运行时目录。
 
 ## 部署陷阱
 
-- 全局热键（keyboard 库）普通权限即可；仅在管理员权限窗口内听写时收不到热键（UIPI 限制）——首次启动自检并提示，不做默认提权
+- 全局热键（keyboard 库）普通权限即可；向管理员窗口注入会受 UIPI 限制。捕获目标时检查顶层与实际焦点进程，权限失配即拒绝开始并给出管理员重启指引，不做默认提权
 - llama-cpp-python 在 PyPI 只有 sdist；必须带 `--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu/` 安装预编译 wheel，否则触发源码编译（需 MSVC）；发行包随包携带 wheel，不依赖第三方个人索引的长期可用性
 - 模型下载在国内网络环境下 GitHub Release 可能超时，须有 ModelScope fallback
