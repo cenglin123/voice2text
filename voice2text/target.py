@@ -53,6 +53,7 @@ _advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_
 _advapi.GetTokenInformation.restype = wintypes.BOOL
 _TOKEN_QUERY = 0x8
 _TokenElevation = 20
+_ERROR_ACCESS_DENIED = 5
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
 _TERMINAL_APPS = {"windowsterminal"}
@@ -103,11 +104,11 @@ def _process_name(pid: int) -> str:
         _kernel.CloseHandle(handle)
 
 
-def _token_elevation(handle: int) -> bool | None:
-    """读取进程令牌的提权状态；查询失败返回 None。"""
+def _token_elevation(handle: int) -> bool:
+    """读取进程令牌的提权状态；查询失败抛出带 Win32 错误码的异常。"""
     token = wintypes.HANDLE()
     if not _advapi.OpenProcessToken(handle, _TOKEN_QUERY, ctypes.byref(token)):
-        return None
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         value = wintypes.DWORD()
         got = wintypes.DWORD()
@@ -115,7 +116,7 @@ def _token_elevation(handle: int) -> bool | None:
             token, _TokenElevation, ctypes.byref(value),
             ctypes.sizeof(value), ctypes.byref(got),
         ):
-            return None
+            raise ctypes.WinError(ctypes.get_last_error())
         return bool(value.value)
     finally:
         # OpenProcessToken 返回的是真实令牌句柄，始终由本函数关闭；传入的
@@ -125,7 +126,10 @@ def _token_elevation(handle: int) -> bool | None:
 
 def self_elevated() -> bool | None:
     """本进程是否以管理员令牌运行（未知时 None，调用方应放行而非拦截）。"""
-    return _token_elevation(_kernel.GetCurrentProcess())
+    try:
+        return _token_elevation(_kernel.GetCurrentProcess())
+    except OSError:
+        return None
 
 
 def process_elevated(pid: int) -> bool | None:
@@ -136,12 +140,14 @@ def process_elevated(pid: int) -> bool | None:
     """
     handle = _kernel.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
     if not handle:
-        return None
+        return True if ctypes.get_last_error() == _ERROR_ACCESS_DENIED else None
     try:
-        elevation = _token_elevation(handle)
-        if elevation is None:
-            return True  # 令牌打不开：目标权限高于本进程
-        return elevation
+        try:
+            return _token_elevation(handle)
+        except OSError as exc:
+            # 只有明确拒绝访问才说明目标权限更高；进程退出、无效句柄等
+            # 其他失败属于未知，调用方按既有策略放行。
+            return True if getattr(exc, "winerror", None) == _ERROR_ACCESS_DENIED else None
     finally:
         _kernel.CloseHandle(handle)
 

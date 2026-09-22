@@ -54,15 +54,28 @@ class ElevationGuardTests(unittest.TestCase):
             self.assertTrue(_capture_stubbed().terminal)
 
     def test_process_elevation_open_process_failure_is_unknown(self):
-        with patch.object(target._kernel, "OpenProcess", return_value=0):
+        with patch.object(target._kernel, "OpenProcess", return_value=0), \
+             patch.object(target.ctypes, "get_last_error", return_value=6):
             self.assertIsNone(target.process_elevated(1))
 
     def test_process_elevation_token_denied_means_higher_privilege(self):
         process_handle = 4321
+        error = OSError("denied")
+        error.winerror = 5
         with patch.object(target._kernel, "OpenProcess", return_value=process_handle), \
-             patch.object(target._advapi, "OpenProcessToken", return_value=0), \
+             patch.object(target, "_token_elevation", side_effect=error), \
              patch.object(target._kernel, "CloseHandle") as close_handle:
             self.assertIs(True, target.process_elevated(1))
+        close_handle.assert_called_once_with(process_handle)
+
+    def test_process_elevation_non_access_error_is_unknown(self):
+        process_handle = 4321
+        error = OSError("invalid handle")
+        error.winerror = 6
+        with patch.object(target._kernel, "OpenProcess", return_value=process_handle), \
+             patch.object(target, "_token_elevation", side_effect=error), \
+             patch.object(target._kernel, "CloseHandle") as close_handle:
+            self.assertIsNone(target.process_elevated(1))
         close_handle.assert_called_once_with(process_handle)
 
     def test_self_elevation_closes_token_not_pseudo_process(self):

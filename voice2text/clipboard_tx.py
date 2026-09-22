@@ -64,6 +64,25 @@ def _empty() -> None:
         win32clipboard.CloseClipboard()
 
 
+def _snapshot(retries: int = 20):
+    """备份当前 IDataObject；空剪贴板返回 None，读取失败绝不覆盖原内容。"""
+    _open()
+    try:
+        if win32clipboard.CountClipboardFormats() == 0:
+            return None
+    finally:
+        win32clipboard.CloseClipboard()
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return pythoncom.OleGetClipboard()
+        except pythoncom.com_error as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(0.01)
+    raise OSError("无法备份当前剪贴板，已取消本次文字输入") from last_error
+
+
 def _initialize_ole() -> None:
     result = _ole.OleInitialize(None)
     if result not in (0, 1):  # S_OK / S_FALSE 都必须配对 OleUninitialize
@@ -81,10 +100,9 @@ def temporary_text(text: str):
     original = None
     sequence = None
     try:
-        try:
-            original = pythoncom.OleGetClipboard()
-        except pythoncom.com_error:
-            original = None
+        # 备份失败与“剪贴板原本为空”不是一回事。若此处继续发布，finally
+        # 会把用户无法读取的原内容当成空剪贴板清掉，因此必须在覆盖前失败。
+        original = _snapshot()
         sequence = _publish(text)
         yield
     finally:

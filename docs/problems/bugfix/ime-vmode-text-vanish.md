@@ -6,7 +6,7 @@ status: mitigated
 severity: high
 liveness: active
 last_confirmed: "2026-09-22"
-confirmed_count: 1
+confirmed_count: 2
 tags: [输入法, 剪贴板粘贴, 热键, IME, keyboard, terminal]
 related_files: [voice2text/hotkey.py, voice2text/input.py, voice2text/main.py]
 verification:
@@ -15,7 +15,7 @@ verification:
   path: scripts/check_session.py
   command: python scripts/check_session.py
 created_at: 2026-09-18
-updated_at: 2026-09-18
+updated_at: 2026-09-22
 evidence:
   - type: user_quote
     ref: "说完到一半，本来已经识别到文字了，但是突然一下文字全部消失（附截图：微软拼音 v 模式面板 + 文本框中落单的 v）"
@@ -57,20 +57,24 @@ partial 刷新恰逢识别推理占满 CPU 时可复现；时序依赖，非必�
    `trigger_on_release=True`。keyboard 0.13.5 会通过内部修饰键状态机抑制和重放事件；
    Windows Terminal 中完整组合仍可能被还原成 `v` 或 `^X`。因此不能只检查注册参数，
    必须明确阻断主键的 keydown 和 keyup。
+5. **先松修饰键时的自动重复**（隔离状态机复现）：完整组合已命中后若先松开 Alt、
+   继续按住 V，后续重复 keydown 因组合不再完整而被放行，仍会向目标输入 `v`。
 
 ## 怎么修复的
 
 1. hotkey.py：不再依赖 `keyboard.add_hotkey(..., trigger_on_release=True)` 的内部修饰键
    重放状态机。新的阻断钩子允许修饰键通过，在完整组合出现时从主键 keydown 开始吞掉，
    到主键 keyup 时只触发一次切换；长按重复 keydown 也不会重复切换。
+   已进入 armed 状态的主键会持续阻断到 keyup，不受修饰键先行松开的影响。
 2. input.py `_paste`：粘贴前补发一次 ctrl keyup 清卡住的修饰键；ctrl down → 20ms →
    v → 20ms → ctrl up，键间间隔让 IME 的异步处理跟上
 3. main.py `_stop_session`：线程 join 后、恢复剪贴板前 sleep 0.3s，等 App 消化最后一次粘贴
 
 ## 验证结果
 
-`python scripts/check_session.py` 的 64 项测试通过。新增回归覆盖：修饰键事件允许通过、完整
+`python scripts/check_session.py` 的 68 项测试通过。新增回归覆盖：修饰键事件允许通过、完整
 组合的主键 down/up 均被阻断、切换只在主键松开时发生，以及缺少修饰键时普通主键保持透传。
+同时覆盖先松修饰键后主键自动重复仍被阻断。
 Windows Terminal 的真实低级输入链仍需分发端复验，因此状态保持为 mitigated。
 
 ## 风险和后续
@@ -83,3 +87,4 @@ Windows Terminal 的真实低级输入链仍需分发端复验，因此状态保
 
 - 2026-09-18: 初始修复（suppress / 键序间隔 / 剪贴板竞态三处）
 - 2026-09-22: 改用主键级阻断状态机，修复 Windows Terminal 收到 `v` / `^X`。
+- 2026-09-22: armed 主键持续阻断到 keyup，修复先松修饰键后的自动重复透传。

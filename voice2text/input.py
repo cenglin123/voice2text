@@ -174,6 +174,7 @@ class TextInserter:
                 if isinstance(exc, OSError):
                     self._session_open = False
                     self.aborted = True  # 注入层系统性失败，主循环提示用户
+                    self.abort_reason = str(exc) or "文字输入失败，已停止上屏"
                 return False
             self._current = target
             return True

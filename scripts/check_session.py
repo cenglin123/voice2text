@@ -84,6 +84,13 @@ class SessionTests(unittest.TestCase):
         self.paste_text.assert_called_once_with("终端输入")
         self.send_text.assert_not_called()
 
+    def test_clipboard_system_error_aborts_session_with_actionable_reason(self):
+        self.destination.process = "windowsterminal"
+        self.paste_text.side_effect = OSError("无法备份当前剪贴板，已取消本次文字输入")
+        self.assertFalse(self.inserter.replace_current("终端输入"))
+        self.assertTrue(self.inserter.aborted)
+        self.assertIn("无法备份当前剪贴板", self.inserter.abort_reason)
+
     def test_restore_and_proofread(self):
         self.inserter.replace_current("测试")
         self.inserter.commit_current()
@@ -581,6 +588,7 @@ class DesktopTests(unittest.TestCase):
              patch.object(clipboard_tx.pythoncom, "OleSetClipboard") as restore, \
              patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CountClipboardFormats", return_value=1), \
              patch.object(clipboard_tx.win32clipboard, "EmptyClipboard"), \
              patch.object(clipboard_tx.win32clipboard, "SetClipboardText"), \
              patch.object(
@@ -605,6 +613,9 @@ class DesktopTests(unittest.TestCase):
     def test_clipboard_restore_failure_does_not_report_successful_paste_as_failed(self):
         with patch.object(clipboard_tx, "_initialize_ole"), \
              patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CountClipboardFormats", return_value=1), \
              patch.object(clipboard_tx.pythoncom, "OleGetClipboard", return_value=Mock()), \
              patch.object(clipboard_tx, "_publish", return_value=7), \
              patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=7), \
@@ -613,6 +624,42 @@ class DesktopTests(unittest.TestCase):
             with clipboard_tx.temporary_text("测试"):
                 pass
         trace.assert_called_once_with("clipboard_restore_failed", detail="restore")
+
+    def test_clipboard_snapshot_failure_never_overwrites_or_clears_user_clipboard(self):
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CountClipboardFormats", return_value=1), \
+             patch.object(
+                 clipboard_tx.pythoncom,
+                 "OleGetClipboard",
+                 side_effect=clipboard_tx.pythoncom.com_error(
+                     -2147221040, "clipboard busy", None, None
+                 ),
+             ), patch.object(clipboard_tx, "_publish") as publish, \
+             patch.object(clipboard_tx, "_empty") as empty, \
+             patch.object(clipboard_tx.time, "sleep"):
+            with self.assertRaisesRegex(OSError, "无法备份"):
+                with clipboard_tx.temporary_text("测试"):
+                    pass
+        publish.assert_not_called()
+        empty.assert_not_called()
+
+    def test_empty_clipboard_can_be_used_and_is_restored_empty(self):
+        with patch.object(clipboard_tx, "_initialize_ole"), \
+             patch.object(clipboard_tx, "_uninitialize_ole"), \
+             patch.object(clipboard_tx.win32clipboard, "OpenClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CloseClipboard"), \
+             patch.object(clipboard_tx.win32clipboard, "CountClipboardFormats", return_value=0), \
+             patch.object(clipboard_tx.pythoncom, "OleGetClipboard") as snapshot, \
+             patch.object(clipboard_tx, "_publish", return_value=7), \
+             patch.object(clipboard_tx.win32clipboard, "GetClipboardSequenceNumber", return_value=7), \
+             patch.object(clipboard_tx, "_empty") as empty:
+            with clipboard_tx.temporary_text("测试"):
+                pass
+        snapshot.assert_not_called()
+        empty.assert_called_once()
 
     def test_hotkey_blocks_main_key_until_release_without_leaking_to_terminal(self):
         callbacks = []
@@ -654,6 +701,27 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(callback(Mock(scan_code=47, event_type=keyboard.KEY_DOWN)))
         self.assertTrue(callback(Mock(scan_code=47, event_type=keyboard.KEY_UP)))
         self.assertFalse(listener.toggle_event.is_set())
+
+    def test_hotkey_repeat_stays_blocked_after_modifier_is_released(self):
+        callbacks = []
+        with patch(
+            "voice2text.hotkey.keyboard.parse_hotkey_combinations",
+            return_value=(((56, 47),),),
+        ), patch(
+            "voice2text.hotkey.keyboard.is_modifier",
+            side_effect=lambda code: code == 56,
+        ), patch(
+            "voice2text.hotkey.keyboard.hook",
+            side_effect=lambda callback, suppress: callbacks.append(callback) or Mock(),
+        ):
+            listener = HotkeyListener("alt+v")
+        callback = callbacks[0]
+        self.assertTrue(callback(Mock(scan_code=56, event_type=keyboard.KEY_DOWN)))
+        self.assertFalse(callback(Mock(scan_code=47, event_type=keyboard.KEY_DOWN)))
+        self.assertTrue(callback(Mock(scan_code=56, event_type=keyboard.KEY_UP)))
+        self.assertFalse(callback(Mock(scan_code=47, event_type=keyboard.KEY_DOWN)))
+        self.assertFalse(callback(Mock(scan_code=47, event_type=keyboard.KEY_UP)))
+        self.assertTrue(listener.toggle_event.is_set())
 
     def test_slow_unicode_input_holds_each_code_unit_before_keyup(self):
         with patch.object(keysender, "_flush") as flush, \

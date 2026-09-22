@@ -6,7 +6,7 @@ status: mitigated
 severity: high
 liveness: active
 last_confirmed: "2026-09-22"
-confirmed_count: 4
+confirmed_count: 5
 tags: [terminal, tui, opencode, uia, sendinput, clipboard, uipi, elevation]
 related_files: [voice2text/target.py, voice2text/input.py, voice2text/clipboard_tx.py, scripts/check_session.py, scripts/check_elevation_guard.py]
 verification:
@@ -55,11 +55,11 @@ updated_at: 2026-09-22
 - 对已知 Windows 终端窗口类使用稳定的原生窗口、进程、线程和焦点句柄身份；不保存随 TUI 重绘变化的 UIA RuntimeId。普通应用仍要求可写 UIA 控件，避免扩大盲写范围。
 - Windows Terminal 的文字传输改用受保护剪贴板粘贴：临时内容不进入 Win+V 和云剪贴板历史，粘贴后恢复用户原剪贴板。终端改发专用的 Ctrl+Shift+V 粘贴组合键；微信等普通 GUI 输入框继续使用 Ctrl+V。
 - 终端识别同时增加 `windowsterminal` 进程名兜底，不再只依赖可能随系统版本、启动方式和窗口状态变化的 XAML 宿主窗口类。
-- 捕获阶段新增提权失配检测（`target.self_elevated` / `target.process_elevated`）：自己非提权而目标提权（或目标令牌不可读，视为权限更高）时，拒绝开始听写并提示"以管理员身份重新启动本软件，或改用非管理员窗口"；目标权限未知时放行，不扩大拦截面。
+- 捕获阶段新增提权失配检测（`target.self_elevated` / `target.process_elevated`）：自己非提权而目标明确提权，或查询被系统以 `ACCESS_DENIED` 拒绝时，拒绝开始听写并提示"以管理员身份重新启动本软件，或改用非管理员窗口"；进程退出、无效句柄等其他查询失败按未知放行，避免误拦普通窗口。
 
 ## 验证结果
 
-- 自动回归：`scripts/check_elevation_guard.py` 8 项全过（提权组合矩阵、令牌与进程句柄所有权、令牌拒绝语义、失败放行）；仓库 `check_session.py` 64 项全过，证明既有终端目标测试不受影响。
+- 自动回归：`scripts/check_elevation_guard.py` 9 项全过（提权组合矩阵、令牌与进程句柄所有权、拒绝访问与其他查询失败的区分）；仓库 `check_session.py` 68 项全过，证明既有终端目标测试不受影响。
 - 真机探针：本机 pythonw=非提权、用户 WT(管理员)=提权、新开 WT=非提权，判定与预期一致；WT 1.24 `defaults.json` 确认 `ctrl+shift+v`→paste 默认绑定存在，排除绑定假设。
 - Windows Terminal 的实际语音输入仍需用户做最终体验验收：管理员终端应出现明确的拒绝提示；非提权终端应正常上屏。
 
@@ -75,3 +75,4 @@ updated_at: 2026-09-22
 - 2026-09-22: Windows Terminal 改用受保护剪贴板粘贴，修复输入事件提交成功但界面无文字的回归。
 - 2026-09-22: 根据分发端日志改用 Ctrl+Shift+V，并增加进程名终端识别兜底。
 - 2026-09-22: 真机定位根因为提权失配（UIPI）；捕获阶段增加提权失配拒绝与管理员指引，新增 check_elevation_guard 回归。
+- 2026-09-22: 仅将明确的 ACCESS_DENIED 视为高权限目标，其他令牌查询失败保持未知并放行。

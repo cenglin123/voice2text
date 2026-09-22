@@ -39,7 +39,11 @@ v0.1.2 在 Windows Terminal 中的二次真机日志确认两处问题：宿主�
 64 项会话测试通过。随后真机实锤根因：本机开启 FilterAdministratorToken，本软件 pythonw
 非提权而用户终端为提权实例，UIPI 静默丢弃 SendInput（识别/剪贴板/注入全部 ok 但无文字）。
 捕获阶段已加提权失配检测：非提权本软件对管理员窗口直接拒绝开始并给出管理员重启指引；
-`scripts/check_elevation_guard.py` 8 项与仓库 `check_session.py` 64 项全部通过。
+提权检测现只在明确提权或 `ACCESS_DENIED` 时拦截，其他令牌查询异常按未知放行；受保护
+剪贴板会先可靠备份，备份失败时取消写入，避免覆盖后误清用户内容；热键主键进入 armed
+状态后持续阻断到 keyup，避免先松修饰键后的自动重复透传。`check_all.py` 已纳入会话与提权
+专项回归并优先使用项目虚拟环境。当前 `scripts/check_elevation_guard.py` 9 项与仓库
+`check_session.py` 68 项全部通过。
 等待用户复验：管理员终端应出现拒绝提示，非提权终端应正常上屏（若仍无文字，下一杠杆
 是把终端粘贴组合键换成 shift+insert）。
 

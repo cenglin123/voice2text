@@ -27,6 +27,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
+def _check_python() -> str:
+    """优先使用已安装项目依赖的解释器，源码环境缺失时回退当前 Python。"""
+    for candidate in (
+        ROOT / ".venv" / "Scripts" / "python.exe",
+        ROOT / "runtime" / "python" / "python.exe",
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
 def _has_file(rel: str) -> bool:
     return (ROOT / rel).is_file()
 
@@ -41,7 +52,7 @@ def _file_lines(rel: str) -> int:
 def _run(name: str, cmd: list[str]) -> tuple[bool, str]:
     """Run a subprocess check. Returns (ok, stdout+stderr)."""
     proc = subprocess.run(
-        [sys.executable, *cmd],
+        [_check_python(), *cmd],
         cwd=str(ROOT),
         capture_output=True, text=True,
         encoding="utf-8", errors="replace",
@@ -129,6 +140,26 @@ def _check_update():
 
 CHECKS.append(("一键更新", _check_update,
               "python scripts/check_update.py（检查版本、固定资产、摘要与 ZIP 安全边界）"))
+
+
+def _check_session_regressions():
+    if not _has_file("scripts/check_session.py"):
+        return True, ""
+    return _run("会话回归", ["scripts/check_session.py"])
+
+
+CHECKS.append(("会话回归", _check_session_regressions,
+              "python scripts/check_session.py（检查热键、目标锁定、注入与校对状态机）"))
+
+
+def _check_elevation_guard():
+    if not _has_file("scripts/check_elevation_guard.py"):
+        return True, ""
+    return _run("提权防护", ["scripts/check_elevation_guard.py"])
+
+
+CHECKS.append(("提权防护", _check_elevation_guard,
+              "python scripts/check_elevation_guard.py（检查 UIPI 权限组合与句柄所有权）"))
 
 
 def main() -> int:

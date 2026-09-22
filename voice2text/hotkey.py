@@ -76,6 +76,10 @@ class HotkeyListener:
         def block(event) -> bool:
             scan_code = int(event.scan_code)
             if event.event_type == keyboard.KEY_DOWN:
+                # 完整组合命中后，即使用户先松开修饰键，主键的自动重复
+                # 仍必须持续吞掉，直到主键 keyup 才解除 armed。
+                if scan_code in armed:
+                    return False
                 down.add(scan_code)
                 matched_main = any(
                     codes.issubset(down) and scan_code in main_by_combination[codes]
