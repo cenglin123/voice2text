@@ -33,26 +33,26 @@ def _archive(path: Path, version: str, malicious: bool = False) -> None:
 def main() -> int:
     assert version_tuple("v0.1.10") > version_tuple("0.1.3")
     release = {
-        "tag_name": "v0.1.4",
+        "tag_name": "v0.1.5",
         "assets": [
-            {"name": "voice2text-v0.1.4-windows-x64.zip",
-             "browser_download_url": "https://github.com/cenglin123/voice2text/releases/download/v0.1.4/voice2text-v0.1.4-windows-x64.zip"},
-            {"name": "voice2text-v0.1.4-windows-x64.zip.sha256",
-             "browser_download_url": "https://github.com/cenglin123/voice2text/releases/download/v0.1.4/voice2text-v0.1.4-windows-x64.zip.sha256"},
+            {"name": "voice2text-v0.1.5-windows-x64.zip",
+             "browser_download_url": "https://github.com/cenglin123/voice2text/releases/download/v0.1.5/voice2text-v0.1.5-windows-x64.zip"},
+            {"name": "voice2text-v0.1.5-windows-x64.zip.sha256",
+             "browser_download_url": "https://github.com/cenglin123/voice2text/releases/download/v0.1.5/voice2text-v0.1.5-windows-x64.zip.sha256"},
         ],
     }
     version, zip_url, sha_url = select_assets(release)
-    assert version == "0.1.4" and zip_url.endswith(".zip") and sha_url.endswith(".sha256")
+    assert version == "0.1.5" and zip_url.endswith(".zip") and sha_url.endswith(".sha256")
     with tempfile.TemporaryDirectory(prefix="voice2text-update-check-") as tmp:
         root = Path(tmp)
         good = root / "good.zip"
-        _archive(good, "0.1.4")
-        validate_archive(good, "0.1.4")
+        _archive(good, "0.1.5")
+        validate_archive(good, "0.1.5")
         assert file_sha256(good) == hashlib.sha256(good.read_bytes()).hexdigest()
         bad = root / "bad.zip"
-        _archive(bad, "0.1.4", malicious=True)
+        _archive(bad, "0.1.5", malicious=True)
         try:
-            validate_archive(bad, "0.1.4")
+            validate_archive(bad, "0.1.5")
         except ValueError:
             pass
         else:
@@ -65,7 +65,7 @@ def main() -> int:
         llm.parent.mkdir(parents=True)
         llm.write_bytes(b"optional-model")
         payload = root / "payload.zip"
-        prefix = "voice2text-v0.1.4-windows-x64/"
+        prefix = "voice2text-v0.1.5-windows-x64/"
         with zipfile.ZipFile(payload, "w") as archive:
             archive.writestr(prefix + "offline-bundle.txt", "new")
             archive.writestr(prefix + "config.json", '{"hotkey":"alt+v"}')
@@ -78,7 +78,7 @@ def main() -> int:
         result = subprocess.run(
             [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
              "-Archive", str(payload), "-InstallDir", str(install), "-ProcessId", "999999",
-             "-Version", "0.1.4", "-NoRestart", "-KeepScript"],
+             "-Version", "0.1.5", "-NoRestart", "-KeepScript"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             env=test_env,
         )
