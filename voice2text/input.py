@@ -336,19 +336,30 @@ class TextInserter:
         self._check_batch()
         trace("injection", process=self._target_process(), text=text,
               transport="protected_clipboard")
+        # Windows Terminal 提供专用的 Ctrl+Shift+V 粘贴绑定；真机已确认当前
+        # Ctrl+V 路径会出现按键发送成功但没有文字。这里选用前者以避开终端配置
+        # 或 shell/readline 对 Ctrl+V 的接管。微信等 GUI 输入框继续使用 Ctrl+V。
+        modifiers = (
+            ("ctrl", "shift")
+            if self._target_process() == "windowsterminal"
+            else ("ctrl",)
+        )
         with temporary_text(text):
-            # 键间必须留间隔：IME 的异步钩子可能把零间隔 Ctrl+V 拆散。
-            keyboard.release("ctrl")
+            # 键间必须留间隔：IME 的异步钩子可能把零间隔组合键拆散。
+            for modifier in reversed(modifiers):
+                keyboard.release(modifier)
             time.sleep(0.01)
             self._check_batch()
-            keyboard.press("ctrl")
+            for modifier in modifiers:
+                keyboard.press(modifier)
             try:
                 time.sleep(0.02)
                 self._check_batch()
                 keyboard.press_and_release("v")
                 time.sleep(0.12)
             finally:
-                keyboard.release("ctrl")
+                for modifier in reversed(modifiers):
+                    keyboard.release(modifier)
 
     def _uses_clipboard(self) -> bool:
         return self._use_clipboard or self._target_process() in _CLIPBOARD_INPUT_APPS

@@ -46,6 +46,7 @@ _kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, 
 _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
 
 _TERMINALS = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "VirtualConsoleClass"}
+_TERMINAL_APPS = {"windowsterminal"}
 _NATIVE_FOCUS_APPS = {"wps", "et", "wpp"}
 # Chromium/WebView 输入框会在页面更新时重建 UIA 节点，RuntimeId 不能作为
 # 会话期间的稳定身份。开始时仍必须通过 UIA 可编辑校验；之后锁原生窗口和
@@ -120,7 +121,9 @@ class InputTarget:
             raise RuntimeError("无法确定目标输入控件")
         focus_tid, focus_pid = _identity(focus)
         window_class = _class(hwnd)
-        terminal = window_class in _TERMINALS
+        # Windows Terminal 的顶层宿主类会随系统版本、启动方式和窗口状态变化；
+        # 进程名比 XAML 宿主窗口类稳定，二者任一命中即可走终端原生焦点路径。
+        terminal = window_class in _TERMINALS or process in _TERMINAL_APPS
         native_focus = terminal or process in _NATIVE_FOCUS_APPS
         volatile_uia = (process, window_class) in _VOLATILE_UIA
         runtime_id = ()

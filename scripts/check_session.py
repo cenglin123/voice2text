@@ -277,9 +277,15 @@ class TargetTests(unittest.TestCase):
         ctrl.GetRuntimeId.return_value = [1, 2]
         self.assertTrue(self.capture(control=ctrl).terminal)
 
+    def test_windows_terminal_process_is_terminal_when_host_class_changes(self):
+        dest = self.capture(terminal=False, control=None, process="windowsterminal",
+                            window_class="ApplicationFrameWindow")
+        self.assertTrue(dest.terminal)
+        self.assertEqual(dest.runtime_id, ())
+
     def test_unknown_uia_failure_rejected(self):
         with self.assertRaises(RuntimeError):
-            self.capture(terminal=False)
+            self.capture(terminal=False, process="unknownapp")
 
     def test_chatgpt_webview_uses_stable_native_focus_after_initial_editable_check(self):
         ctrl = Mock(ControlTypeName="EditControl")
@@ -544,6 +550,25 @@ class PerformanceTests(unittest.TestCase):
 class DesktopTests(unittest.TestCase):
     def test_hotkey_poll_interval_stays_below_perceptible_delay(self):
         self.assertLessEqual(UI_POLL_MS, 30)
+
+    def test_windows_terminal_pastes_with_ctrl_shift_v(self):
+        destination = Mock(process="windowsterminal")
+        destination.focused.return_value = True
+        inserter = TextInserter()
+        inserter.begin_session(destination)
+        with patch("voice2text.input.temporary_text") as temporary, \
+             patch("voice2text.input.time.sleep"), \
+             patch("voice2text.input.keyboard.press") as press, \
+             patch("voice2text.input.keyboard.press_and_release") as press_release, \
+             patch("voice2text.input.keyboard.release") as release:
+            inserter._paste_text("终端输入")
+        temporary.assert_called_once_with("终端输入")
+        self.assertEqual([call.args[0] for call in press.call_args_list], ["ctrl", "shift"])
+        press_release.assert_called_once_with("v")
+        self.assertEqual(
+            [call.args[0] for call in release.call_args_list],
+            ["shift", "ctrl", "shift", "ctrl"],
+        )
 
     def test_protected_clipboard_marks_temporary_text_private_and_restores(self):
         original = Mock()
