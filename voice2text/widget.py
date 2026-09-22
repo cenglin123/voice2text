@@ -3,7 +3,7 @@
 渲染：整面板用 Pillow 以 3x 超采样绘制再缩小（抗锯齿），tkinter 只负责贴图与
 事件；系统合成器实时模糊背后内容，失败回退深蓝渐变。声波按 ~90ms 重绘。
 
-状态：idle 待命 / loading 模型加载 / listening 聆听 / proofreading 校对 / error 不可用。
+状态：idle 待命 / loading 准备 / listening 聆听 / proofreading 校对 / error 短暂不可用提示。
 线程约定：公开方法须在主线程调用；工作线程经 ui_queue 传 ("state", s) 由 pump 应用。
 """
 
@@ -23,6 +23,7 @@ BASE_W, BASE_H = 340, 104
 MIN_ASPECT, MAX_ASPECT = 1.0, 5.0
 CORNER_RADIUS = 22
 SS = 3  # 超采样倍数
+ERROR_RESET_MS = 2000
 
 # 美术稿取色
 BG_TOP = (38, 53, 82)
@@ -40,7 +41,7 @@ CIRCLE_FILL = (12, 19, 31)
 
 STATUS_TEXT = {
     "idle": "待命中...",
-    "loading": "加载中...",
+    "loading": "准备中，请稍候",
     "listening": "正在聆听...",
     "proofreading": "校对中...",
     "error": "不可用",
@@ -89,6 +90,7 @@ class DictationWidget:
         self._on_quit = on_quit
         self._on_resize = on_resize
         self._state = "idle"
+        self._error_reset_job = None
         self._phase = 0.0
         try:  # 高 DPI 模糊缓解——必须早于首个窗口创建（进程级设置）
             import ctypes
@@ -445,9 +447,19 @@ class DictationWidget:
 
     def set_state(self, state: str) -> None:
         """主线程调用：切换状态并重绘。"""
+        if self._error_reset_job is not None:
+            self.root.after_cancel(self._error_reset_job)
+            self._error_reset_job = None
         if state != self._state:
             self._state = state
             self._render()
+        if state == "error":
+            self._error_reset_job = self.root.after(ERROR_RESET_MS, self._reset_error)
+
+    def _reset_error(self) -> None:
+        self._error_reset_job = None
+        if self._state == "error":
+            self.set_state("idle")
 
     def pump(self, ui_queue: "queue.Queue[tuple]") -> None:
         """主线程轮询：应用工作线程投递的状态消息。"""

@@ -8,12 +8,14 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-22 22:12
+> 最近重建：2026-09-23 01:14
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [悬浮窗不可用状态不会自动恢复](../../docs/problems/bugfix/widget-error-state-sticky.md) — fixed · low · active · 更新于 2026-09-23
+- [识别流尚未就绪时悬浮窗提前显示正在聆听](../../docs/problems/bugfix/listening-before-asr-ready.md) — fixed · high · active · 更新于 2026-09-23
 - [调试录音在退出后可能残留于磁盘](../../docs/problems/bugfix/debug-audio-cleanup.md) — fixed · high · active · 更新于 2026-09-22
 - [Alt+V 多次切换后 Alt 修饰键可能残留按下状态](../../docs/problems/bugfix/hotkey-alt-latched-after-toggle.md) — mitigated · high · active · 更新于 2026-09-21
 - [临时粘贴失败或竞争时可能损坏正文与用户剪贴板](../../docs/problems/bugfix/clipboard-snapshot-failure.md) — fixed · high · active · 更新于 2026-09-22

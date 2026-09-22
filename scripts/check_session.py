@@ -1,6 +1,8 @@
 """离线回归：模拟焦点与注入，不向用户窗口发送按键，不加载模型。"""
 from pathlib import Path
+import queue
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -494,6 +496,40 @@ class PunctuationTests(unittest.TestCase):
             metrics.summary()["punctuation_restore"]["results"], {"applied": 1}
         )
 
+    def test_worker_reports_ready_only_after_recognition_stream_exists(self):
+        allow_stream = threading.Event()
+        recognizer = Mock()
+        stream = Mock()
+
+        def create_stream():
+            allow_stream.wait(1.0)
+            return stream
+
+        recognizer.create_stream.side_effect = create_stream
+        recognizer.is_ready.return_value = False
+        recognizer.is_endpoint.return_value = False
+        asr = Mock(recognizer=recognizer)
+        asr.decode.return_value = ""
+        audio_queue = queue.Queue()
+        audio_queue.put(None)
+        worker = ASRSessionWorker(asr, audio_queue, 16000, Mock(), Mock())
+        worker.start()
+        self.assertFalse(worker.wait_until_ready(0.02))
+        allow_stream.set()
+        self.assertTrue(worker.wait_until_ready(1.0))
+        worker.join(1.0)
+        self.assertFalse(worker.is_alive())
+
+    def test_worker_readiness_surfaces_stream_creation_failure(self):
+        recognizer = Mock()
+        recognizer.create_stream.side_effect = RuntimeError("stream init failed")
+        asr = Mock(recognizer=recognizer)
+        worker = ASRSessionWorker(asr, queue.Queue(), 16000, Mock(), Mock())
+        worker.start()
+        self.assertFalse(worker.wait_until_ready(1.0))
+        worker.join(1.0)
+        self.assertIn("stream init failed", worker.error)
+
     def test_worker_displays_raw_text_then_commits_punctuated_sentence(self):
         events = []
         punctuator = Mock()
@@ -547,6 +583,42 @@ class PunctuationTests(unittest.TestCase):
 
 
 class PerformanceTests(unittest.TestCase):
+    def test_session_becomes_active_only_after_worker_is_ready(self):
+        values = dict(DEFAULTS)
+        values.update(proofread_enabled=False, punctuation_enabled=False)
+        app = DictationApp(AppConfig(**values))
+        order = []
+        app._asr = Mock()
+        app._capture = Mock(queue=queue.Queue())
+        app._capture.start.side_effect = lambda: order.append("capture")
+        app._inserter = Mock(aborted=False)
+        app._inserter.guard_focus.return_value = True
+        worker = Mock(error=None)
+        worker.start.side_effect = lambda: order.append("worker")
+        worker.wait_until_ready.side_effect = lambda timeout: order.append("ready") or True
+        with patch("voice2text.main.ASRSessionWorker", return_value=worker), \
+             patch.object(app, "_cue", side_effect=lambda name: order.append(name)):
+            app._start_session()
+        self.assertTrue(app.active)
+        self.assertEqual(order, ["capture", "worker", "ready", "start"])
+
+    def test_session_does_not_claim_listening_when_worker_never_becomes_ready(self):
+        values = dict(DEFAULTS)
+        values.update(proofread_enabled=False, punctuation_enabled=False)
+        app = DictationApp(AppConfig(**values))
+        app._asr = Mock()
+        app._capture = Mock(queue=queue.Queue())
+        app._inserter = Mock(aborted=False)
+        app._inserter.guard_focus.return_value = True
+        worker = Mock(error="识别流创建失败")
+        worker.wait_until_ready.return_value = False
+        with patch("voice2text.main.ASRSessionWorker", return_value=worker), \
+             self.assertRaisesRegex(RuntimeError, "识别流创建失败"):
+            app._start_session()
+        self.assertFalse(app.active)
+        self.assertEqual(app._session_gen, 2)
+        app._capture.stop.assert_called_once()
+
     def test_cancelled_inference_keeps_timing_and_reason(self):
         import io
         from contextlib import redirect_stdout

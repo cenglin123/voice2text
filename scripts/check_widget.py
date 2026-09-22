@@ -50,6 +50,14 @@ def main() -> None:
             widget._on_press(event)
             widget._on_release(event)
             assert calls[-1] == result
+        widget.set_state("error")
+        self_reset_job = widget._error_reset_job
+        assert self_reset_job is not None
+        widget.set_state("loading")
+        assert widget._error_reset_job is None
+        widget.set_state("error")
+        widget._reset_error()
+        assert widget.state == "idle"
         # 拖动必须经过同一透明度处理路径，且释放时不触发听写。
         with patch.object(layered, "update", wraps=layered.update) as update:
             before = len(calls)

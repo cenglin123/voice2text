@@ -41,6 +41,7 @@ ASR_REQUIRED_FILES = (
     "tokens.txt",
 )
 UI_POLL_MS = 30
+ASR_READY_TIMEOUT_SECONDS = 8.0
 
 
 def resolve_help_document(project_root: Path = PROJECT_ROOT) -> Path:
@@ -266,6 +267,13 @@ class DictationApp:
             metrics=self._metrics,
         )
         self._worker.start()
+        if not self._worker.wait_until_ready(ASR_READY_TIMEOUT_SECONDS):
+            reason = self._worker.error or "识别器准备超时"
+            self._session_gen += 1  # 拦截超时 worker 随后恢复时产生的迟到回调
+            self._capture.stop()
+            self._worker.join(timeout=1.0)
+            self._worker = None
+            raise RuntimeError(f"识别器未能就绪：{reason}")
         self._active = True
         self._cue("start")
         print(f"[听写中] 再按 {self._cfg.hotkey} 停止")

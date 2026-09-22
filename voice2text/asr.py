@@ -77,7 +77,12 @@ class ASRSessionWorker(threading.Thread):
         self._punctuator = punctuator
         self._metrics = metrics
         self._last_partial = ""
+        self._ready = threading.Event()
         self.error: str | None = None  # 识别线程致命异常（上屏 IO 失败等），主循环据此善后
+
+    def wait_until_ready(self, timeout: float) -> bool:
+        """等待识别流创建完成；失败或超时均返回 False。"""
+        return self._ready.wait(timeout) and self.error is None
 
     def run(self) -> None:
         # 回调链会走到 uiautomation（COM）——工作线程必须各自初始化 COM
@@ -91,9 +96,13 @@ class ASRSessionWorker(threading.Thread):
             self._run_loop()
         except Exception as exc:  # noqa: BLE001 —— daemon 线程异常不能静默死亡（会话假活）
             self.error = f"识别线程异常退出：{exc}"
+        finally:
+            # create_stream 失败时也必须唤醒启动线程，避免界面永久停在准备中。
+            self._ready.set()
 
     def _run_loop(self) -> None:
         stream = self._asr.recognizer.create_stream()
+        self._ready.set()
         while True:
             wait_started = perf_counter_ns()
             try:
