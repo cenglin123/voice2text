@@ -5,8 +5,8 @@ title: 连续说话时校对完全不生效（无标点、语气词残留）
 status: fixed
 severity: high
 liveness: active
-last_confirmed: 2026-09-19
-confirmed_count: 1
+last_confirmed: 2026-09-23
+confirmed_count: 2
 tags: [校对, Qwen, endpoint, 分句, 标点]
 related_files: [voice2text/proofread.py, voice2text/punctuation.py, voice2text/asr.py, voice2text/config.py, voice2text/main.py]
 verification:
@@ -15,12 +15,14 @@ verification:
   path: scripts/check_session.py
   command: python scripts/check_session.py
 created_at: 2026-09-18
-updated_at: 2026-09-19
+updated_at: 2026-09-23
 evidence:
   - type: user_quote
     ref: "有一个问题就是没有标准符号全是文字连空格都没有啊这句话就是我刚才用语音输入输入的"
   - type: conversation_context
     ref: "本地复现：45 字无语气词长句 proofread 返回与原文完全相同（模型照抄）"
+  - type: user_quote
+    ref: "用户能够连续不断的说话，然后还能充分表达自己的意思。不用说我为了将就软件打断用户的思考"
 ---
 
 # 连续说话时校对完全不生效（无标点、语气词残留）
@@ -58,6 +60,9 @@ evidence:
    规避了长文本照抄问题，替换记账改为 replace_committed_range（块内多句合并替换）
 5. endpoint 锁句时先用 sherpa-onnx INT8 标点模型处理；字符一致性门禁保证它只能插入
    标点，不能改动识别文字。这样即使停止后的 Qwen 校对取消，已锁句仍有基础标点。
+6. 20 秒时长型 endpoint 只作为识别流重置：允许当前段内部标点，但不强加句末符号。
+   自然停顿的标点模型读取最近 32 字只读原文；停止后的 Qwen 校对按块读取前后各至多 24 字
+   只读语境，仅输出并替换当前块，连续块的末尾符号受后续内容约束。
 
 ## 验证结果
 
@@ -72,9 +77,14 @@ evidence:
 - 10 秒仅提示慢校对，结果仍会应用；单块 30 秒没有返回时会释放输入焦点，迟到结果无法写入后续会话
 - 分块替换在屏幕上逐块跳动数次，若体验差可改为全部块完成后一次性替换
 - 阶段 5 评估：换 Qwen3-4B 对比校对质量/速度
+- 连续语意不应被 ASR 的 20 秒流重置切断。2026-09-23 增加时长型 endpoint 识别：
+  强制切段保留内部标点但不强加句末符号；自然停顿的标点模型参考最近 32 字只读原文，
+  停止后的校对读取每块前后各至多 24 字只读上下文，并只替换当前块。
+  长时间不停说话不会要求用户人工停顿，但小模型仍可能误判内部标点，最终语意质量需真机复验。
 
 ## 变更历史
 
 - 2026-09-18: 初始修复（阈值/prompt/重试）+ 交互重构（停止后统一校对）
 - 2026-09-19: 修正事后超时丢弃、区分模型校对与标点兜底，并加入会话代数阻断迟到结果
 - 2026-09-19: 增加停顿锁句标点层；真实中文样例耗时约 5–11ms，覆盖只插标点安全回归
+- 2026-09-23: 区分强制流重置与自然停顿，并引入有限上下文的标点与事后校对。

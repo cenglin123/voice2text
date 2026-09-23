@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-23 20:02
+> 最近重建：2026-09-23 20:31
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-23
 - [Windows Terminal / OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — mitigated · high · active · 更新于 2026-09-22
 - [管理员目标窗口的权限提示只在运行输出中可见](../../docs/problems/bugfix/admin-target-warning-hidden-in-log.md) — fixed · medium · active · 更新于 2026-09-23
 - [高 DPI 屏幕上悬浮窗和设置界面偏小](../../docs/problems/bugfix/desktop-ui-too-small-at-high-dpi.md) — fixed · medium · active · 更新于 2026-09-23
@@ -33,7 +34,6 @@
 - [Python 证书链失败导致模型下载无法完成](../../docs/problems/bugfix/model-download-certificate-chain.md) — mitigated · medium · active · 更新于 2026-09-19
 - [安装器可能选中不兼容的系统 Python](../../docs/problems/bugfix/installer-python-compatibility.md) — fixed · medium · active · 更新于 2026-09-19
 - [设置页滑块在最小值时左端圆点被裁切](../../docs/problems/bugfix/settings-slider-endpoint-clipping.md) — fixed · low · active · 更新于 2026-09-19
-- [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-19
 - [听写失焦后文字或校对可能写到其他位置](../../docs/problems/bugfix/session-target-lock.md) — fixed · high · active · 更新于 2026-09-19
 - [设置窗口四角出现向内的蓝色块](../../docs/problems/bugfix/settings-corner-mask-inset.md) — fixed · low · active · 更新于 2026-09-19
 - [毛玻璃悬浮窗圆角锯齿与角落蓝底](../../docs/problems/bugfix/widget-glass-corners.md) — fixed · medium · active · 更新于 2026-09-19

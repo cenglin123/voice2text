@@ -2,7 +2,8 @@
 
 关键语义（docs/overview.md「流式 partial 为什么整句刷新」）：
 - get_result() 返回当前句的累计假设文本，解码中尾部会自我修正——消费方必须整句替换
-- endpoint（rule2 停顿阈值）触发后当前句锁定、reset 开始新句；Alt+V 停止时
+- 自然停顿锁句时尝试标点；rule3 达到 20 秒仅为识别流重置，不视为语义句末。
+- endpoint 后 reset 开始新段；Alt+V 停止时
   input_finished() 后做最终解码，尾句照常产出（见计划阶段 4 停止语义）
 """
 
@@ -17,6 +18,9 @@ import sherpa_onnx
 
 from voice2text.config import AppConfig
 from voice2text.diagnostics import trace
+
+MAX_UTTERANCE_SECONDS = 20.0
+CONTEXT_CHARS = 32
 
 
 class StreamingASR:
@@ -35,7 +39,7 @@ class StreamingASR:
             enable_endpoint_detection=True,
             rule1_min_trailing_silence=2.4,
             rule2_min_trailing_silence=cfg.endpoint_pause_seconds,
-            rule3_min_utterance_length=20.0,
+            rule3_min_utterance_length=MAX_UTTERANCE_SECONDS,
         )
 
     @property
@@ -77,6 +81,8 @@ class ASRSessionWorker(threading.Thread):
         self._punctuator = punctuator
         self._metrics = metrics
         self._last_partial = ""
+        self._context = ""
+        self._utterance_samples = 0
         self._ready = threading.Event()
         self.error: str | None = None  # 识别线程致命异常（上屏 IO 失败等），主循环据此善后
 
@@ -114,6 +120,7 @@ class ASRSessionWorker(threading.Thread):
             if chunk is None:
                 break
             stream.accept_waveform(self._sample_rate, chunk)
+            self._utterance_samples += len(chunk)
             decode_started = perf_counter_ns()
             text = self._asr.decode(stream)
             if self._metrics is not None:
@@ -122,7 +129,9 @@ class ASRSessionWorker(threading.Thread):
                 self._last_partial = text
                 self._on_partial(text)
             if self._asr.recognizer.is_endpoint(stream):
-                self._finish_sentence(stream)
+                forced = self._utterance_samples >= int((MAX_UTTERANCE_SECONDS - 0.5) * self._sample_rate)
+                self._finish_sentence(stream, forced=forced)
+                self._utterance_samples = 0
         # 流结束（Alt+V 停止）：尾句最终解码后产出
         stream.input_finished()
         decode_started = perf_counter_ns()
@@ -132,17 +141,17 @@ class ASRSessionWorker(threading.Thread):
         if final:
             self._deliver_sentence(final)
 
-    def _finish_sentence(self, stream: sherpa_onnx.OnlineStream) -> None:
+    def _finish_sentence(self, stream: sherpa_onnx.OnlineStream, *, forced: bool = False) -> None:
         decode_started = perf_counter_ns()
         text = self._asr.decode(stream)
         if self._metrics is not None:
             self._metrics.record("asr_endpoint_decode", perf_counter_ns() - decode_started)
         if text:
-            self._deliver_sentence(text)
+            self._deliver_sentence(text, terminal=not forced)
         self._asr.recognizer.reset(stream)
         self._last_partial = ""
 
-    def _deliver_sentence(self, text: str) -> None:
+    def _deliver_sentence(self, text: str, *, terminal: bool = True) -> None:
         """原文成功同步后，才以只加标点的版本锁句。
 
         endpoint 最终解码只允许在最后一个已显示 partial 后追加内容；若它删除
@@ -151,16 +160,21 @@ class ASRSessionWorker(threading.Thread):
         """
         displayed = self._last_partial
         stable_text = text if not displayed or text.startswith(displayed) else displayed
-        trace("asr_endpoint", partial=displayed, final=text, stable=stable_text)
+        trace("asr_endpoint", partial=displayed, final=text, stable=stable_text,
+              kind="pause" if terminal else "duration")
         if self._on_partial(stable_text) is False:
             return
-        self._on_sentence(self._restore_punctuation(stable_text))
+        committed = self._on_sentence(self._restore_punctuation(stable_text, terminal=terminal))
+        if committed is not False:
+            self._context = (self._context + stable_text)[-CONTEXT_CHARS:]
 
-    def _restore_punctuation(self, text: str) -> str:
+    def _restore_punctuation(self, text: str, *, terminal: bool = True) -> str:
         if self._punctuator is None:
             return text
         started = perf_counter_ns()
-        result, outcome = self._punctuator.restore(text)
+        result, outcome = self._punctuator.restore(text, context=self._context)
+        if not terminal and not text.endswith(("。", "？", "！", ".", "?", "!")):
+            result = result.rstrip("。？！.!?")
         if self._metrics is not None:
             self._metrics.record("punctuation_restore", perf_counter_ns() - started, outcome)
         return result

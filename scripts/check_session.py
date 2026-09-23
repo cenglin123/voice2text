@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import keyboard
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from voice2text import target, keysender, clipboard_tx, capture
@@ -473,6 +474,75 @@ class TargetTests(unittest.TestCase):
 
 
 class ProofreadTests(unittest.TestCase):
+    def test_final_proofread_passes_bounded_neighbor_context(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._input_session = 1
+        app._locked_sentences = ["甲" * 40, "乙" * 40, "丙" * 40]
+        app._inserter = Mock(aborted=False)
+        app._inserter.replace_committed_range.return_value = True
+
+        class Reader:
+            def __init__(self):
+                self.calls = []
+
+            def proofread_with_outcome(self, text, **kwargs):
+                self.calls.append((text, kwargs))
+                return text, "cleanup_success"
+
+        reader = Reader()
+        app._proofreader = reader
+        app._finalize_proofread(1)
+        self.assertEqual(len(reader.calls), 3)
+        self.assertEqual(reader.calls[1][1], {
+            "before": "甲" * 24, "after": "丙" * 24, "continuation": True,
+        })
+        self.assertFalse(reader.calls[-1][1]["continuation"])
+
+    def test_continuation_chunk_keeps_internal_comma_but_no_forced_period(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._generate = Mock(return_value="前半段，意思还没说完。")
+        result, outcome = proofreader.proofread_with_outcome(
+            "前半段意思还没说完", after="所以继续解释", continuation=True,
+        )
+        self.assertEqual((result, outcome), ("前半段，意思还没说完", "cleanup_success"))
+
+    def test_continuation_fallback_does_not_append_period(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._generate = Mock(side_effect=[None, None])
+        result, outcome = proofreader.proofread_with_outcome(
+            "前半段意思还没说完", after="所以继续解释", continuation=True,
+        )
+        self.assertEqual((result, outcome), ("前半段意思还没说完", "terminal_fallback"))
+
+    def test_context_is_read_only_and_only_target_is_returned(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._lock = threading.Lock()
+        proofreader._llm = Mock()
+        proofreader._llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": "现在说第二段。"}}]
+        }
+        result, outcome = proofreader.proofread_with_outcome(
+            "现在说第二段", before="前文还没有说完", after="后文接着解释"
+        )
+        self.assertEqual((result, outcome), ("现在说第二段。", "cleanup_success"))
+        messages = proofreader._llm.create_chat_completion.call_args.kwargs["messages"]
+        self.assertIn("前文还没有说完", messages[1]["content"])
+        self.assertIn("后文接着解释", messages[1]["content"])
+        self.assertNotIn("前文还没有说完", messages[0]["content"])
+        self.assertEqual(messages[2]["content"], "现在说第二段 /no_think")
+
+    def test_context_echo_is_rejected(self):
+        proofreader = Proofreader.__new__(Proofreader)
+        proofreader._lock = threading.Lock()
+        proofreader._llm = Mock()
+        proofreader._llm.create_chat_completion.return_value = {
+            "choices": [{"message": {"content": "上文：前文还没有说完。现在说第二段。"}}]
+        }
+        result, outcome = proofreader.proofread_with_outcome(
+            "现在说第二段", before="前文还没有说完"
+        )
+        self.assertEqual((result, outcome), ("现在说第二段。", "terminal_fallback"))
+
     def test_cleanup_failure_falls_back_to_punctuation_task(self):
         proofreader = Proofreader.__new__(Proofreader)
         proofreader._generate = Mock(side_effect=[None, "这是测试。"])
@@ -509,6 +579,68 @@ class PunctuationTests(unittest.TestCase):
         )
         self.assertEqual(result, "现在是什么情况，标点去哪儿了？")
         self.assertEqual(outcome, "applied")
+
+    def test_context_guides_current_segment_without_changing_history(self):
+        restorer = self.restorer("前文还没有说完。现在继续讲，因此需要谨慎。")
+        result, outcome = restorer.restore("现在继续讲因此需要谨慎", context="前文还没有说完")
+        self.assertEqual((result, outcome), ("现在继续讲，因此需要谨慎。", "applied"))
+
+    def test_context_rewrite_falls_back_to_safe_single_segment(self):
+        restorer = self.restorer("前文被改写。现在继续讲。")
+        restorer._engine.add_punctuation.side_effect = [
+            "前文被改写。现在继续讲。", "现在继续讲。",
+        ]
+        result, outcome = restorer.restore("现在继续讲", context="前文还没有说完")
+        self.assertEqual((result, outcome), ("现在继续讲。", "applied"))
+
+    def test_forced_duration_boundary_does_not_commit_terminal_punctuation(self):
+        events = []
+        punctuator = Mock()
+        punctuator.restore.return_value = ("持续表达，中途不停止。", "applied")
+        recognizer = Mock()
+        recognizer.create_stream.return_value = Mock()
+        recognizer.is_endpoint.return_value = True
+        asr = Mock(recognizer=recognizer)
+        asr.decode.side_effect = ["持续表达中途不停止", "持续表达中途不停止", ""]
+        audio_queue = queue.Queue()
+        audio_queue.put(np.zeros(20 * 16000, dtype=np.float32))
+        audio_queue.put(None)
+        worker = ASRSessionWorker(
+            asr, audio_queue, 16000,
+            lambda value: events.append(("partial", value)),
+            lambda value: events.append(("sentence", value)) or value,
+            punctuator,
+        )
+        worker._run_loop()
+        self.assertEqual(events[-1], ("sentence", "持续表达，中途不停止"))
+        self.assertEqual(worker._context, "持续表达中途不停止")
+
+    def test_continuous_speech_keeps_context_after_forced_stream_reset(self):
+        events = []
+        punctuator = Mock()
+        punctuator.restore.side_effect = [
+            ("我还在思考。", "applied"), ("所以接着说。", "applied"),
+        ]
+        recognizer = Mock()
+        recognizer.create_stream.return_value = Mock()
+        recognizer.is_endpoint.side_effect = [True, True]
+        asr = Mock(recognizer=recognizer)
+        asr.decode.side_effect = ["我还在思考", "我还在思考", "所以接着说", "所以接着说", ""]
+        audio_queue = queue.Queue()
+        audio_queue.put(np.zeros(20 * 16000, dtype=np.float32))
+        audio_queue.put(np.zeros(16000, dtype=np.float32))
+        audio_queue.put(None)
+        worker = ASRSessionWorker(
+            asr, audio_queue, 16000,
+            lambda value: events.append(("partial", value)),
+            lambda value: events.append(("sentence", value)) or value,
+            punctuator,
+        )
+        worker._run_loop()
+        self.assertEqual([value for kind, value in events if kind == "sentence"],
+                         ["我还在思考", "所以接着说。"])
+        self.assertEqual(punctuator.restore.call_args_list[1].kwargs,
+                         {"context": "我还在思考"})
 
     def test_rejects_any_recognition_text_change(self):
         original = "准确的识别"

@@ -34,7 +34,7 @@ voice2text：Windows 桌面语音听写工具。按下 Alt+V 开始/停止听写
 
 - **用户**：中文交流；关注可分发性（自包含、一键安装）与最终用户体验
 - **项目上下文**：voice2text 处于从零开发阶段，技术选型已定（sherpa-onnx 流式识别 + Qwen GGUF 校对 + llama-cpp-python）
-- **最近教训**：① llama-cpp-python 在 PyPI 只有 sdist、无任何 wheel——Windows wheel 仅在作者索引 abetlen.github.io/llama-cpp-python/whl/cpu/，装依赖必须带 `--extra-index-url`；② sherpa-onnx 1.13.x 的 Python 模块名是 `sherpa_onnx`（旧 `sherpa.onnx` 已废弃）；③ embeddable Python 的 `._pth` 隔离模式不含 cwd，须在 `._pth` 追加项目根 + 设 `PYTHONNOUSERSITE=1`；④ sherpa-onnx funasr-nano int8 版有转写重复问题（issue #3066），避开 int8；⑤ 全局热键主键必须从命中到 key-up 全程 suppress；默认上屏用 VK_PACKET，微信与 Windows Terminal 改用带历史/云同步排除标记的受保护剪贴板事务，事务必须先稳定备份并发布临时文本，再删除待替换正文；Windows Terminal 使用 Ctrl+Shift+V
+- **最近教训**：① llama-cpp-python 在 PyPI 只有 sdist、无任何 wheel——Windows wheel 仅在作者索引 abetlen.github.io/llama-cpp-python/whl/cpu/，装依赖必须带 `--extra-index-url`；② sherpa-onnx 1.13.x 的 Python 模块名是 `sherpa_onnx`（旧 `sherpa.onnx` 已废弃）；③ embeddable Python 的 `._pth` 隔离模式不含 cwd，须在 `._pth` 追加项目根 + 设 `PYTHONNOUSERSITE=1`；④ sherpa-onnx funasr-nano int8 版有转写重复问题（issue #3066），避开 int8；⑤ 全局热键主键必须从命中到 key-up 全程 suppress；默认上屏用 VK_PACKET，微信与 Windows Terminal 改用带历史/云同步排除标记的受保护剪贴板事务，事务必须先稳定备份并发布临时文本，再删除待替换正文；Windows Terminal 使用 Ctrl+Shift+V；⑥ ASR 的 20 秒 rule3 只重置识别流，不等同语义句末，停顿标点的历史上下文只能只读，停止后的校对仅替换目标块
 - **详细记忆**：[.agents/memory/MEMORY.md](.agents/memory/MEMORY.md)
 
 > 维护细节（写入触发、touch 规范、索引重建）见 MEMORY.md 和 `python scripts/maintain.py`。

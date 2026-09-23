@@ -352,7 +352,13 @@ class DictationApp:
             timer.start()
             try:
                 if callable(getattr(type(self._proofreader), "proofread_with_outcome", None)):
-                    corrected, outcome = self._proofreader.proofread_with_outcome(text)
+                    before = "".join(sentences[max(0, start - 2):start])[-24:]
+                    after = "".join(sentences[end + 1:end + 3])[:24]
+                    corrected, outcome = self._proofreader.proofread_with_outcome(
+                        text, before=before, after=after,
+                        continuation=end < len(sentences) - 1 and
+                        not text.rstrip().endswith(("。", "？", "！", ".", "?", "!")),
+                    )
                 else:
                     corrected = self._proofreader.proofread(text)
                     outcome = getattr(self._proofreader, "last_outcome", "model_returned")

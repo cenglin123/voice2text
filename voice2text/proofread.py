@@ -23,8 +23,10 @@ _NO_THINK = "/no_think"
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _THINK_UNCLOSED = re.compile(r"<think>.*$", re.DOTALL)  # max_tokens 截断在思考段内
 _OUTPUT_PREFIX = re.compile(r"^(?:输出|校对后|结果)[：:]\s*")
+_CONTEXT_ECHO = re.compile(r"(?:^|\n)(?:上文|下文|待校对)(?:（只读）)?[：:]")
 _HAS_PUNCT = re.compile(r"[，。？！、；：,.?!]")
 _HAS_TERMINAL = re.compile(r"[。？！.!?]$")
+_TRAILING_TERMINAL = re.compile(r"[。？！.!?]+$")
 _HAS_CJK = re.compile(r"[\u3400-\u9fff]")
 
 SYSTEM_PROMPT = (
@@ -42,6 +44,7 @@ SYSTEM_PROMPT = (
 )
 
 CHUNK_CHARS = 60  # 分块校对上限：小模型对更长文本会照抄原文（实测 bug）
+CONTEXT_CHARS = 24
 
 
 def chunk_sentences(sentences: list[str], max_chars: int = CHUNK_CHARS) -> list[tuple[int, int, str]]:
@@ -93,7 +96,8 @@ class Proofreader:
         self.last_outcome = outcome
         return result
 
-    def proofread_with_outcome(self, text: str) -> tuple[str | None, str]:
+    def proofread_with_outcome(self, text: str, *, before: str = "", after: str = "",
+                               continuation: bool = False) -> tuple[str | None, str]:
         """校对一块文本。返回校正文本；失败/可疑时返回 None（调用方保留原文）。
 
         两段式：先清理（错字/语气词/顺句）；原文无标点而结果仍无标点时
@@ -103,23 +107,32 @@ class Proofreader:
         text = text.strip()
         if not text:
             return None, "empty"
-        result = self._generate(text, SYSTEM_PROMPT, temperature=0.3)
+        before, after = before[-CONTEXT_CHARS:], after[:CONTEXT_CHARS]
+        context = (before, after) if before or after else None
+        context_rule = "\n前一条用户消息仅提供只读语境，最后一条用户消息才是待校对文本。" if context else ""
+        result = self._generate(text, SYSTEM_PROMPT + context_rule, temperature=0.3,
+                                context=context)
         # 清理任务失败或仍未给出标点时，始终再走一次只加标点的窄任务。
         # 这条路径只允许插入标点，因此可以安全地从原文直接降级。
         base = result or text
         if not _HAS_PUNCT.search(base):
-            punctuated = self._generate(base, PUNCT_SYSTEM_PROMPT, temperature=0.3)
+            punctuated = self._generate(base, PUNCT_SYSTEM_PROMPT + context_rule,
+                                        temperature=0.3, context=context)
             if punctuated is not None and _HAS_PUNCT.search(punctuated):
                 if _NO_PUNCT.sub("", punctuated) == _NO_PUNCT.sub("", base):
-                    return self._ensure_terminal(punctuated), "punctuation_model_success"
+                    return self._finish_boundary(punctuated, continuation), "punctuation_model_success"
         if result is not None and _HAS_PUNCT.search(result):
-            return self._ensure_terminal(result), "cleanup_success"
+            return self._finish_boundary(result, continuation), "cleanup_success"
         # 清理输出无标点且窄任务未成功时，不能把可能改写过的清理结果直接上屏。
         # 降级必须回到原始识别文本，只允许补一个句末符号。
         result = text
         # 两次本地模型调用都失败时也不能把无标点原文原样留下；只补句末符号，
         # 不猜测内部断句，不改变任何识别文字。
-        return self._ensure_terminal(result), "terminal_fallback"
+        return self._finish_boundary(result, continuation), "terminal_fallback"
+
+    @staticmethod
+    def _finish_boundary(text: str, continuation: bool) -> str:
+        return _TRAILING_TERMINAL.sub("", text) if continuation else Proofreader._ensure_terminal(text)
 
     @staticmethod
     def _ensure_terminal(text: str) -> str:
@@ -128,15 +141,18 @@ class Proofreader:
             return text + "。"
         return text
 
-    def _generate(self, text: str, system: str, temperature: float) -> str | None:
+    def _generate(self, text: str, system: str, temperature: float,
+                  context: tuple[str, str] | None = None) -> str | None:
         max_tokens = min(512, len(text) * 3 + 64)
+        messages = [{"role": "system", "content": system}]
+        if context is not None:
+            before, after = context
+            messages.append({"role": "user", "content": f"上文：{before}\n下文：{after}"})
+        messages.append({"role": "user", "content": text + " " + _NO_THINK})
         try:
             with self._lock:
                 out = self._llm.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": text + " " + _NO_THINK},
-                    ],
+                    messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
@@ -153,6 +169,8 @@ class Proofreader:
         for wrapper in (('"', '"'), ('"', '"'), ("「", "」")):
             if cleaned.startswith(wrapper[0]) and cleaned.endswith(wrapper[1]) and len(cleaned) >= 2:
                 cleaned = cleaned[1:-1].strip()
+        if context and (_CONTEXT_ECHO.search(cleaned) or len(cleaned) > len(text) * 1.5 + 10):
+            return None
         if not self._plausible(text, cleaned):
             return None
         return cleaned

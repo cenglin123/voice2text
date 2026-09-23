@@ -12,7 +12,7 @@ from voice2text.diagnostics import trace
 _PUNCTUATION = re.compile(r"[，。？！、；：,.!?;:]")
 
 
-def _project_punctuation(original: str, result: str) -> str | None:
+def _project_punctuation(original: str, result: str, frozen_chars: int = 0) -> str | None:
     """把模型新增标点投影回原文，保留原文全部字符及空格。"""
     required = [char for char in original if not char.isspace()]
     additions: dict[int, list[str]] = {}
@@ -33,13 +33,14 @@ def _project_punctuation(original: str, result: str) -> str | None:
     if source_index != len(required):
         return None
 
-    projected = "".join(additions.get(0, ()))
+    projected = "".join(additions.get(0, ())) if frozen_chars == 0 else ""
     source_index = 0
     for char in original:
         projected += char
         if not char.isspace():
             source_index += 1
-            projected += "".join(additions.get(source_index, ()))
+            if source_index > frozen_chars:
+                projected += "".join(additions.get(source_index, ()))
     return projected
 
 
@@ -57,16 +58,27 @@ class PunctuationRestorer:
             sherpa_onnx.OfflinePunctuationConfig(model=model)
         )
 
-    def restore(self, text: str) -> tuple[str, str]:
+    def restore(self, text: str, *, context: str = "") -> tuple[str, str]:
         """返回（结果，状态）。结果若改变了非标点字符则拒绝。"""
         if not text.strip():
             return text, "empty"
+        context = context[-32:]
+        source = context + text
         try:
-            result = self._engine.add_punctuation(text)
+            result = self._engine.add_punctuation(source)
         except Exception:  # noqa: BLE001 —— 标点失败不应中断识别
             return text, "error"
-        projected = _project_punctuation(text, result) if result else None
-        trace("punctuation", source=text, model=result, projected=projected)
+        frozen_chars = sum(not char.isspace() for char in context)
+        projected = _project_punctuation(source, result, frozen_chars) if result else None
+        projected = projected[len(context):] if projected is not None else None
+        if projected is None and context:
+            # 上下文让模型改写了旧字时回退到原有的单段模式；不因提示增强降低安全性。
+            try:
+                result = self._engine.add_punctuation(text)
+                projected = _project_punctuation(text, result) if result else None
+            except Exception:  # noqa: BLE001
+                projected = None
+        trace("punctuation", source=text, context=context, model=result, projected=projected)
         if projected is None:
             return text, "unsafe_change"
         return projected, "applied" if projected != text else "unchanged"
