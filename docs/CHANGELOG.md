@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-09-24
+
+### 发布 v0.1.4 Windows 自包含版本 [governance]
+
+#### 变更内容
+- GitHub 正式 Release 已上传 Windows x64 离线包与 SHA-256 校验文件；标签 cb51c61，远端 ZIP 摘要与本地一致。
+
+---
+
 ## 2026-09-23
 
 ### 修复听写就绪提示与悬浮窗错误态
