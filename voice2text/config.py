@@ -31,6 +31,7 @@ DEFAULTS: dict = {
     "widget_opacity": 0.92,  # 悬浮窗不透明度 0.3~1.0
     "font_scale": 1.0,  # 设置页与托盘字体缩放 0.85~1.35
     "sound_cue": True,  # 开始/停止听写提示音
+    "input_device": "",  # 麦克风选择器；空值使用 Windows/PortAudio 默认输入
     "autostart": False,  # 开机自启动（实际状态以注册表为准，此处仅持久化 UI 选择）
     "non_editable_process_blacklist": [],
 }
@@ -56,6 +57,7 @@ class AppConfig:
     font_scale: float
     sound_cue: bool
     autostart: bool
+    input_device: str
     non_editable_process_blacklist: list = field(default_factory=list)
 
     def asr_file(self, name: str) -> Path:
@@ -101,6 +103,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         font_scale=float(merged["font_scale"]),
         sound_cue=bool(merged["sound_cue"]),
         autostart=bool(merged["autostart"]),
+        input_device=str(merged["input_device"]),
         non_editable_process_blacklist=list(merged["non_editable_process_blacklist"]),
     )
 

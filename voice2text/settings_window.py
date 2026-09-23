@@ -502,6 +502,44 @@ class SettingsWindow:
                       command=self._download_model, bg=_TRACK, fg=_TEXT, width=210, height=38)
         self._download_button.pack(side="right")
         self._poll_model_download()
+        mic_row = tkinter.Frame(c3, bg=_CARD)
+        mic_row.pack(fill="x", pady=(4, 8))
+        tkinter.Label(mic_row, text="输入设备", bg=_CARD, fg=_TEXT,
+                      font=(_FONT, -14)).pack(anchor="w")
+        tkinter.Label(
+            mic_row,
+            text="可指定真实麦克风；设备列表会在每次听写时重新解析，适配热插拔。",
+            bg=_CARD, fg=_SUB, font=(_FONT, -12),
+        ).pack(anchor="w", pady=(2, 5))
+        from voice2text.capture import list_input_device_choices
+        self._mic_selector_by_label = {"（系统默认）": ""}
+        try:
+            self._mic_selector_by_label.update(
+                (label, selector) for label, selector in list_input_device_choices()
+            )
+        except Exception as exc:  # noqa: BLE001 —— 枚举失败时仍允许保存默认设备
+            tkinter.Label(mic_row, text=f"无法读取设备列表：{exc}", bg=_CARD,
+                          fg=_SUB, font=(_FONT, -11), wraplength=450,
+                          justify="left").pack(anchor="w")
+        saved_selector = str(self._cfg.get("input_device", "") or "")
+        selected_label = next(
+            (label for label, selector in self._mic_selector_by_label.items()
+             if selector == saved_selector),
+            "（系统默认）" if not saved_selector else f"不可用设备：{saved_selector}",
+        )
+        if saved_selector and selected_label not in self._mic_selector_by_label:
+            self._mic_selector_by_label[selected_label] = saved_selector
+        self._mic_var = tkinter.StringVar(value=selected_label)
+        self._mic_menu = tkinter.OptionMenu(
+            mic_row, self._mic_var, *self._mic_selector_by_label.keys()
+        )
+        self._mic_menu.config(bg=_TRACK, fg=_TEXT, activebackground="#304766",
+                              activeforeground=_TEXT, relief="flat", bd=0,
+                              highlightthickness=1, highlightbackground=_CARD_EDGE,
+                              anchor="w", font=(_FONT, -12))
+        self._mic_menu["menu"].config(bg=_CARD, fg=_TEXT, activebackground=_ACCENT,
+                                      activeforeground="#FFFFFF", font=(_FONT, -12))
+        self._mic_menu.pack(fill="x")
         self._sound_var = tkinter.BooleanVar(value=bool(self._cfg.get("sound_cue", True)))
         self._autostart_var = tkinter.BooleanVar(value=get_autostart())
         self._toggles = []
@@ -822,6 +860,9 @@ class SettingsWindow:
         self._cfg["widget_opacity"] = round(self._opacity_var.get() / 100, 2)
         self._cfg["font_scale"] = round(self._font_var.get() / 100, 2)
         self._cfg["proofread_enabled"] = bool(self._proof_var.get()) and self._llm_path.is_file()
+        self._cfg["input_device"] = self._mic_selector_by_label.get(
+            self._mic_var.get(), ""
+        )
         self._cfg["sound_cue"] = bool(self._sound_var.get())
         self._cfg["autostart"] = bool(self._autostart_var.get())
         set_autostart(bool(self._autostart_var.get()))

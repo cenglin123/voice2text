@@ -92,6 +92,24 @@ class SessionTests(unittest.TestCase):
                 recorder.cleanup_debug_dump()
                 self.assertFalse(debug_path.exists())
 
+    def test_selected_input_device_resolves_by_name_and_host_api(self):
+        devices = [
+            {"name": "Array Mic", "max_input_channels": 1, "default_samplerate": 48000, "hostapi": 0},
+            {"name": "Array Mic", "max_input_channels": 1, "default_samplerate": 44100, "hostapi": 1},
+            {"name": "Speakers", "max_input_channels": 0, "default_samplerate": 48000, "hostapi": 0},
+        ]
+        with patch.object(capture.sd, "query_devices", return_value=devices), \
+             patch.object(capture.sd, "query_hostapis", return_value=[{"name": "MME"}, {"name": "WASAPI"}]):
+            self.assertEqual(capture.resolve_input_device("WASAPI::Array Mic"), 1)
+            self.assertEqual(capture.list_input_device_choices(), [
+                ("Array Mic · MME", "MME::Array Mic"),
+                ("Array Mic · WASAPI", "WASAPI::Array Mic"),
+            ])
+            with self.assertRaisesRegex(capture.CaptureError, "不可用"):
+                capture.resolve_input_device("WASAPI::Missing Mic")
+            with self.assertRaisesRegex(capture.CaptureError, "歧义"):
+                capture.resolve_input_device("Array Mic")
+
     def test_windows_terminal_uses_protected_clipboard_transport(self):
         self.destination.process = "windowsterminal"
         self.send_text.reset_mock()
@@ -327,7 +345,7 @@ class TargetTests(unittest.TestCase):
     def test_chatgpt_webview_uses_stable_native_focus_after_initial_editable_check(self):
         ctrl = Mock(ControlTypeName="EditControl")
         ctrl.GetRuntimeId.return_value = [1, 2]
-        ctrl.GetValuePattern.return_value = None
+        ctrl.GetPattern.return_value = None
         dest = self.capture(terminal=False, control=ctrl, process="chatgpt",
                             window_class="Chrome_WidgetWin_1")
         self.assertEqual(dest.runtime_id, ())
@@ -336,11 +354,39 @@ class TargetTests(unittest.TestCase):
     def test_weixin_webview_uses_stable_native_focus_after_initial_editable_check(self):
         ctrl = Mock(ControlTypeName="EditControl")
         ctrl.GetRuntimeId.return_value = [1, 2]
-        ctrl.GetValuePattern.return_value = None
+        ctrl.GetPattern.return_value = None
         dest = self.capture(terminal=False, control=ctrl, process="weixin",
                             window_class="Chrome_WidgetWin_1")
         self.assertEqual(dest.runtime_id, ())
         self.assertFalse(dest.terminal)
+
+    def test_weixin_window_control_without_value_pattern_is_accepted(self):
+        # UIA may surface the WebView input area as WindowControl, which does not
+        # expose GetValuePattern; volatile WebView targets use native focus guards.
+        ctrl = Mock(ControlTypeName="WindowControl")
+        ctrl.GetRuntimeId.return_value = [1, 2]
+        dest = self.capture(terminal=False, control=ctrl, process="weixin",
+                            window_class="Chrome_WidgetWin_1")
+        self.assertEqual(dest.runtime_id, ())
+        ctrl.GetPattern.assert_not_called()
+
+    def test_uia_validation_preserves_reason_and_unexpected_detail(self):
+        with patch.object(target, "foreground", return_value=123), \
+             patch.object(target, "_identity", return_value=(45, 999999)), \
+             patch.object(target, "_process_name", return_value="ordinaryapp"), \
+             patch.object(target, "_focus", return_value=124), \
+             patch.object(target, "_class", return_value="MainWindow"), \
+             patch.object(target.auto, "GetFocusedControl", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "无法读取目标输入控件"):
+                target.InputTarget.capture(set())
+        with patch.object(target, "foreground", return_value=123), \
+             patch.object(target, "_identity", return_value=(45, 999999)), \
+             patch.object(target, "_process_name", return_value="ordinaryapp"), \
+             patch.object(target, "_focus", return_value=124), \
+             patch.object(target, "_class", return_value="MainWindow"), \
+             patch.object(target.auto, "GetFocusedControl", side_effect=AttributeError("UIA detail")):
+            with self.assertRaisesRegex(RuntimeError, "UIA detail"):
+                target.InputTarget.capture(set())
 
     def test_wps_apps_allow_stable_native_focus_when_uia_is_custom_drawn(self):
         for process in ("wps", "et", "wpp"):

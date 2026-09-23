@@ -37,6 +37,43 @@ def list_input_devices() -> list[tuple[int, str, float]]:
     return devices
 
 
+def list_input_device_choices() -> list[tuple[str, str]]:
+    """返回 (显示名, 稳定选择器)；选择器包含 host API，避免重名设备歧义。"""
+    host_apis = sd.query_hostapis()
+    choices = []
+    for idx, dev in enumerate(sd.query_devices()):  # type: ignore[union-attr]
+        if dev["max_input_channels"] <= 0:
+            continue
+        name = str(dev["name"])
+        host = str(host_apis[int(dev["hostapi"])]["name"])
+        choices.append((f"{name} · {host}", f"{host}::{name}"))
+    return choices
+
+
+def resolve_input_device(selector: str | None) -> int | None:
+    """把已保存设备选择器解析为当前 PortAudio 索引，避免热插拔后索引漂移。"""
+    if not selector:
+        return None
+    if "::" in selector:
+        host, name = selector.split("::", 1)
+        host_apis = sd.query_hostapis()
+        hits = [
+            idx for idx, dev in enumerate(sd.query_devices())  # type: ignore[union-attr]
+            if dev["max_input_channels"] > 0
+            and str(dev["name"]).casefold() == name.casefold()
+            and str(host_apis[int(dev["hostapi"])]["name"]).casefold() == host.casefold()
+        ]
+    else:
+        # 兼容未来扩展前写入的纯设备名配置。
+        hits = [idx for idx, name, _ in list_input_devices()
+                if name.casefold() == selector.casefold()]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise CaptureError(f"所选麦克风已不可用：{selector}。请在设置中重新选择输入设备。")
+    raise CaptureError(f"输入设备名称有歧义：{selector}。请在设置中选择带主机 API 名称的设备。")
+
+
 def _resample(x: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     """线性插值重采样。分块处理会在块边界损失一点连续性，对语音识别可接受。"""
     if src_rate == dst_rate:
@@ -50,9 +87,11 @@ def _resample(x: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
 class MicrophoneCapture:
     """一次 start/stop 周期代表一段听写会话。线程安全：回调线程写入，消费线程读取。"""
 
-    def __init__(self, target_rate: int = TARGET_RATE, debug_dump_wav: bool = False) -> None:
+    def __init__(self, target_rate: int = TARGET_RATE, debug_dump_wav: bool = False,
+                 device: str | None = None) -> None:
         self._target_rate = target_rate
         self._debug_dump_wav = debug_dump_wav
+        self.device_selector = device
         self._stream: sd.InputStream | None = None
         self._actual_rate = target_rate
         self._lock = threading.Lock()
@@ -90,8 +129,10 @@ class MicrophoneCapture:
         # 注意：_actual_rate 必须在创建流之前赋值——探测（start/stop 试开）期间回调
         # 就可能触发；探测期音频进入会话队列是可接受的（本来就是会话的一部分）。
         self._actual_rate = self._target_rate
+        device = resolve_input_device(self.device_selector)
         try:
             stream = sd.InputStream(
+                device=device,
                 samplerate=self._target_rate,
                 channels=1,
                 dtype="float32",
@@ -104,10 +145,12 @@ class MicrophoneCapture:
         except Exception:
             # 设备不支持目标采样率：以设备默认采样率打开，回调里重采样
             try:
-                dev_rate = float(sd.query_devices(kind="input")["default_samplerate"])  # type: ignore[index]
+                dev_info = sd.query_devices(device, "input") if device is not None else sd.query_devices(kind="input")
+                dev_rate = float(dev_info["default_samplerate"])
                 rate = int(dev_rate) if dev_rate > 0 else 48000
                 self._actual_rate = rate
                 stream = sd.InputStream(
+                    device=device,
                     samplerate=rate,
                     channels=1,
                     dtype="float32",
@@ -119,8 +162,9 @@ class MicrophoneCapture:
                 return stream, rate
             except Exception as exc:
                 devices = "\n".join(f"  [{i}] {name} ({rate0:.0f}Hz)" for i, name, rate0 in list_input_devices())
+                selected = f"所选设备：{self.device_selector}。" if self.device_selector else ""
                 raise CaptureError(
-                    f"无法打开麦克风（{exc}）。请检查麦克风是否连接、是否被其他程序独占。可用输入设备：\n{devices or '  （无）'}"
+                    f"无法打开麦克风。{selected}错误：{exc}。请检查麦克风是否连接、是否被其他程序独占。可用输入设备：\n{devices or '  （无）'}"
                 ) from exc
 
     def _on_audio(self, indata: np.ndarray, frames: int, time_info: object, status: object) -> None:

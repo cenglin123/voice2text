@@ -80,7 +80,8 @@ class DictationApp:
     def __init__(self, cfg: AppConfig) -> None:
         self._cfg = cfg
         self._capture = MicrophoneCapture(
-            target_rate=cfg.sample_rate, debug_dump_wav=cfg.debug_dump_wav
+            target_rate=cfg.sample_rate, debug_dump_wav=cfg.debug_dump_wav,
+            device=cfg.input_device or None,
         )
         self._metrics = PerformanceRecorder()
         self._inserter = TextInserter(
@@ -515,6 +516,15 @@ class DictationApp:
                 cfg_dict["hotkey"] = self.hotkey.combo  # rebind 失败回退旧值
                 print(f"[设置] 热键更换失败（{exc}），保留 {self.hotkey.combo}")
         self._cfg.hotkey = str(cfg_dict.get("hotkey", self._cfg.hotkey))
+        new_device = str(cfg_dict.get("input_device", self._cfg.input_device) or "")
+        try:
+            self._capture.device_selector = new_device or None
+            self._cfg.input_device = new_device
+            cfg_dict["input_device"] = new_device
+            print(f"[设置] 输入设备：{new_device or '系统默认'}")
+        except Exception as exc:  # noqa: BLE001
+            cfg_dict["input_device"] = self._cfg.input_device
+            print(f"[设置] 输入设备更改失败（{exc}），保留原设备")
         self._cfg.proofread_enabled = bool(cfg_dict.get("proofread_enabled", True))
         self._cfg.sound_cue = bool(cfg_dict.get("sound_cue", True))
         self._cfg.widget_scale = float(cfg_dict.get("widget_scale", 1.0))
@@ -636,6 +646,7 @@ def _gui_main(output) -> int:
                         "proofread_enabled": cfg.proofread_enabled,
                         "sound_cue": cfg.sound_cue,
                         "font_scale": cfg.font_scale,
+                        "input_device": cfg.input_device,
                     }
                     ui.settings = SettingsWindow(
                         cfg_dict, app.apply_settings, ui.widget.snapshot(),

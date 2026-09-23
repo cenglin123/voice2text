@@ -5,8 +5,8 @@ title: 微信富文本输入框会话中断与锁句标点误覆盖
 status: investigating
 severity: high
 liveness: active
-last_confirmed: 2026-09-21
-confirmed_count: 8
+last_confirmed: 2026-09-23
+confirmed_count: 9
 tags: [微信, Weixin, UIA, RuntimeId, 标点, 上屏]
 related_files: [voice2text/target.py, voice2text/asr.py, voice2text/input.py, voice2text/keysender.py, voice2text/main.py, scripts/check_session.py]
 verification:
@@ -34,7 +34,7 @@ evidence:
   - type: error_log
     ref: "实时上屏已正确，但每次原剪贴板恢复都报告 CLIPBRD_E_CANT_CLOSE"
 created_at: 2026-09-20
-updated_at: 2026-09-21
+updated_at: 2026-09-23
 ---
 
 # 微信富文本输入框会话中断与锁句标点误覆盖
@@ -87,10 +87,14 @@ updated_at: 2026-09-21
     和停顿标点实时通过受保护粘贴更新。
 11. 恢复仍存活的原 IDataObject 时只调用 `OleSetClipboard`；不再用 `OleFlushClipboard` 强制
     立即物化全部格式，避免真机持续触发 `CLIPBRD_E_CANT_CLOSE`。
+12. UIA 基类统一通过 `GetPattern(PatternId.ValuePattern)` 查询 ValuePattern；微信与 ChatGPT
+    可能将焦点控件报告为 WindowControl/CustomControl，因此按进程名使用原生焦点锁定，避免
+    把 UIA 控件类型误当作可编辑性的可靠依据。仍要求 UIA 能返回焦点控件；未知应用继续严格验证。
+13. 目标捕获把业务校验异常原样报告，意外 UIA 异常则附带底层原因，避免故障被统一吞成无细节提示。
 
 ## 验证结果
 
-`python scripts/check_session.py` 通过 59 项测试，其中包含微信动态 UIA、锁句最终文本丢字、
+`python scripts/check_session.py` 通过 82 项测试，其中包含微信 WindowControl UIA、锁句最终文本丢字、
 句首/重复标点、partial 实时受保护粘贴、停顿标点插入和校对阶段零覆盖；另检查隐私格式、原始
 IDataObject 恢复以及恢复异常不影响已完成上屏。尚未在真实微信客户端完成本轮 OLE 修复后的
 手工冒烟。
@@ -111,3 +115,4 @@ IDataObject 恢复以及恢复异常不影响已完成上屏。尚未在真实�
 - 待提交：微信 Qt 输入框改用受保护剪贴板事务。
 - 待提交：修复 OLE 初始化并恢复微信 partial 实时上屏。
 - 待提交：恢复原 IDataObject 时移除不必要的强制物化。
+- 2026-09-23: 兼容微信/ChatGPT WebView 的 WindowControl 与 ValuePattern 基类查询，并保留 UIA 失败原因。

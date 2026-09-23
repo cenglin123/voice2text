@@ -65,6 +65,9 @@ _VOLATILE_UIA = {
     ("chatgpt", "Chrome_WidgetWin_1"),
     ("weixin", "Chrome_WidgetWin_1"),
 }
+# 微信与 ChatGPT 的输入区域经常被 UIA 报告成 Window/Custom，而非编辑控件。
+# 这些应用用原生焦点窗口锁定会话，并由 InputActivityGuard 防止用户操作后误写。
+_VOLATILE_UIA_PROCESSES = {"chatgpt", "weixin"}
 
 
 def foreground() -> int:
@@ -193,7 +196,10 @@ class InputTarget:
         # 进程名比 XAML 宿主窗口类稳定，二者任一命中即可走终端原生焦点路径。
         terminal = window_class in _TERMINALS or process in _TERMINAL_APPS
         native_focus = terminal or process in _NATIVE_FOCUS_APPS
-        volatile_uia = (process, window_class) in _VOLATILE_UIA
+        volatile_uia = (
+            process in _VOLATILE_UIA_PROCESSES
+            or (process, window_class) in _VOLATILE_UIA
+        )
         runtime_id = ()
         try:
             ctrl = auto.GetFocusedControl()
@@ -201,16 +207,20 @@ class InputTarget:
                 if not native_focus:
                     raise RuntimeError("无法读取目标输入控件")
             else:
-                runtime_id = tuple(ctrl.GetRuntimeId() or ())
-                if native_focus:
-                    # TUI 和 WPS 编辑区使用动态/自绘控件，UIA 身份不可作为稳定依据。
+                if native_focus or volatile_uia:
+                    # 自绘编辑器和 WebView 的 UIA 身份不稳定，使用原生焦点锁定。
                     runtime_id = ()
-            if not native_focus:
+                else:
+                    runtime_id = tuple(ctrl.GetRuntimeId() or ())
+            if not native_focus and ctrl is not None:
                 editable = ctrl.ControlTypeName in {"EditControl", "DocumentControl"}
-                value = ctrl.GetValuePattern()
-                if value is not None:
-                    editable = not value.IsReadOnly
-                if not editable or not runtime_id:
+                if not volatile_uia:
+                    # GetValuePattern 是部分控件子类的方法；Control.GetPattern 是
+                    # uiautomation 的基类 API，WindowControl 上也可安全调用。
+                    value = ctrl.GetPattern(auto.PatternId.ValuePattern)
+                    if value is not None:
+                        editable = not value.IsReadOnly
+                if not volatile_uia and (not editable or not runtime_id):
                     raise RuntimeError("当前控件不可编辑，请将光标放入输入框")
                 # ChatGPT、微信桌面端会在流式文本更新时重建 WebView UIA 节点，
                 # RuntimeId 随之变化，但原生焦点 HWND 保持不变。物理鼠标/键盘
@@ -218,9 +228,15 @@ class InputTarget:
                 # 稳定原生身份。
                 if volatile_uia:
                     runtime_id = ()
+        except RuntimeError:
+            # 保留可操作的校验原因，避免被兜底异常改写成笼统提示。
+            raise
         except Exception as exc:
             if not native_focus:
-                raise RuntimeError("无法验证目标输入控件，听写未开始") from exc
+                detail = str(exc).strip() or type(exc).__name__
+                raise RuntimeError(
+                    f"无法验证目标输入控件，听写未开始（{detail}）"
+                ) from exc
             runtime_id = ()
         if foreground() != hwnd or _focus(tid) != focus:
             raise RuntimeError("开始时焦点发生变化，请重新开始")
