@@ -33,6 +33,7 @@ from voice2text.input import TextInserter
 from voice2text.proofread import Proofreader, chunk_sentences
 from voice2text.performance import PerformanceRecorder
 from voice2text.punctuation import PunctuationRestorer
+from voice2text.target import ElevatedTargetError
 
 ASR_REQUIRED_FILES = (
     "encoder-epoch-99-avg-1.onnx",
@@ -181,6 +182,8 @@ class DictationApp:
                 self._busy = False
                 print(f"[听写未开始] {exc}")
                 self.push_state("error")
+                if isinstance(exc, ElevatedTargetError):
+                    self.cmd_queue.put(("elevation_notice", str(exc)))
                 return
             self._session_thread = threading.Thread(target=self._start_toggle, daemon=True)
         self._session_thread.start()
@@ -674,6 +677,10 @@ def _gui_main(output) -> int:
                     ui.debug = DebugWindow(ui.widget.root, output)
                 else:
                     ui.debug.show()
+            elif cmd == "elevation_notice":
+                from tkinter import messagebox
+
+                messagebox.showwarning("无法向管理员窗口输入", payload, parent=ui.widget.root)
             elif cmd == "apply_update":
                 if app._active or app._busy:
                     print("[更新] 请先等待听写和校对结束")

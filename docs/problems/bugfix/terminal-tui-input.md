@@ -5,8 +5,8 @@ title: Windows Terminal / OpenCode TUI 听写已启动但没有文字
 status: mitigated
 severity: high
 liveness: active
-last_confirmed: "2026-09-22"
-confirmed_count: 5
+last_confirmed: "2026-09-23"
+confirmed_count: 6
 tags: [terminal, tui, opencode, uia, sendinput, clipboard, uipi, elevation]
 related_files: [voice2text/target.py, voice2text/input.py, voice2text/clipboard_tx.py, scripts/check_session.py, scripts/check_elevation_guard.py]
 verification:

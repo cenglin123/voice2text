@@ -70,6 +70,10 @@ _VOLATILE_UIA = {
 _VOLATILE_UIA_PROCESSES = {"chatgpt", "weixin"}
 
 
+class ElevatedTargetError(RuntimeError):
+    """目标权限高于本进程，输入会被 Windows 拦截。"""
+
+
 def foreground() -> int:
     return _user.GetForegroundWindow() or 0
 
@@ -187,7 +191,7 @@ class InputTarget:
             process_elevated(candidate) is True
             for candidate in {pid, focus_pid} if candidate
         ):
-            raise RuntimeError(
+            raise ElevatedTargetError(
                 f"目标窗口（{process}）以管理员权限运行，普通权限的本软件无法向它输入文字。"
                 "请右键以管理员身份重新启动本软件，或改用非管理员窗口听写。"
             )

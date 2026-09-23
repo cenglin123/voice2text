@@ -67,6 +67,16 @@ class SessionTests(unittest.TestCase):
             )
         )
 
+    def test_elevated_target_displays_actionable_notice(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._models_ready.set()
+        reason = "目标以管理员权限运行，请以管理员身份重新启动本软件。"
+        with patch.object(app._inserter, "capture_target", side_effect=target.ElevatedTargetError(reason)):
+            app.request_toggle()
+        self.assertEqual(app.cmd_queue.get_nowait(), ("elevation_notice", reason))
+        self.assertEqual(app.ui_queue.get_nowait(), ("state", "error"))
+        self.assertFalse(app.active)
+
     def test_help_document_prefers_packaged_install_guide(self):
         from tempfile import TemporaryDirectory
 
