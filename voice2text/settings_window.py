@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageTk
 from voice2text.config import PROJECT_ROOT, load_config
 from voice2text.model_download import model_download
 from voice2text import __version__
+from voice2text.dpi import system_scale
 from voice2text.update import update_manager
 
 _BG = "#16243D"
@@ -35,7 +36,11 @@ _WINDOW_KEY = "#010203"
 _WINDOW_RADIUS = 14
 
 
-def _nav_icon(kind: str) -> ImageTk.PhotoImage:
+def _ui_scale(master) -> float:
+    return float(getattr(master.winfo_toplevel(), "_v2t_dpi_scale", 1.0))
+
+
+def _nav_icon(kind: str, scale: float = 1.0) -> ImageTk.PhotoImage:
     image = Image.new("RGBA", (72, 72))
     d = ImageDraw.Draw(image)
     color = "#BED1EC"
@@ -62,7 +67,8 @@ def _nav_icon(kind: str) -> ImageTk.PhotoImage:
         d.arc((18, 22, 54, 53), 0, 180, fill=color, width=4)
         d.line((36, 53, 36, 63), fill=color, width=4)
         d.line((27, 63, 45, 63), fill=color, width=4)
-    return ImageTk.PhotoImage(image.resize((24, 24), Image.Resampling.LANCZOS))
+    side = round(24 * scale)
+    return ImageTk.PhotoImage(image.resize((side, side), Image.Resampling.LANCZOS))
 
 
 def _surface(w: int, h: int, radius: int, fill: str, edge: str | None = None) -> ImageTk.PhotoImage:
@@ -79,18 +85,21 @@ class Card(tkinter.Canvas):
     """圆角卡片，内部仍用原生布局管理文本与交互。"""
 
     def __init__(self, master):
+        self._dpi = _ui_scale(master)
+        p = lambda value: round(value * self._dpi)
         super().__init__(master, bg=_BG, highlightthickness=0, height=1)
         self.content = tkinter.Frame(self, bg=_CARD)
-        self._item = self.create_window(18, 10, window=self.content, anchor="nw")
+        self._item = self.create_window(p(18), p(10), window=self.content, anchor="nw")
         self.bind("<Configure>", self._layout)
         self.content.bind("<Configure>", self._layout)
 
     def _layout(self, _ev=None):
-        w = max(60, self.winfo_width())
-        self.itemconfigure(self._item, width=w - 36)
-        h = self.content.winfo_reqheight() + 20
+        p = lambda value: round(value * self._dpi)
+        w = max(p(60), self.winfo_width())
+        self.itemconfigure(self._item, width=w - p(36))
+        h = self.content.winfo_reqheight() + p(20)
         self.configure(height=h)
-        self._image = _surface(w, h, 12, _CARD, _CARD_EDGE)
+        self._image = _surface(w, h, p(12), _CARD, _CARD_EDGE)
         self.delete("surface")
         self.create_image(0, 0, image=self._image, anchor="nw", tags="surface")
         self.tag_lower("surface")
@@ -147,7 +156,8 @@ class Toggle(tkinter.Canvas):
     """胶囊开关（美术稿样式）：开=蓝色，关=深灰。"""
 
     def __init__(self, master, variable: tkinter.BooleanVar, command=None):
-        super().__init__(master, width=46, height=26, bg=master["bg"], highlightthickness=1,
+        self._dpi = _ui_scale(master)
+        super().__init__(master, width=round(46 * self._dpi), height=round(26 * self._dpi), bg=master["bg"], highlightthickness=1,
                          highlightbackground=master["bg"], highlightcolor=_ACCENT,
                          cursor="hand2", takefocus=True)
         self._var = variable
@@ -157,13 +167,14 @@ class Toggle(tkinter.Canvas):
         self._draw()
 
     def _draw(self) -> None:
+        p = lambda value: round(value * self._dpi)
         self.delete("all")
         on = bool(self._var.get())
         track = _ACCENT if on else "#39465C"
-        self._image = _surface(46, 26, 13, track, None if on else "#6C809E")
+        self._image = _surface(p(46), p(26), p(13), track, None if on else "#6C809E")
         self.create_image(0, 0, image=self._image, anchor="nw")
         kx = 33 if on else 13
-        self.create_oval(kx - 8, 5, kx + 8, 21, fill="#F2F5F9", outline="")
+        self.create_oval(p(kx - 8), p(5), p(kx + 8), p(21), fill="#F2F5F9", outline="")
 
     def _flip(self, _ev) -> None:
         self._var.set(not bool(self._var.get()))
@@ -177,14 +188,15 @@ class Slider(tkinter.Canvas):
 
     def __init__(self, master, variable: tkinter.DoubleVar, w: int = 240,
                  minimum: int = 0, maximum: int = 100):
-        super().__init__(master, width=w, height=28, bg=master["bg"], highlightthickness=1,
+        self._dpi = _ui_scale(master)
+        super().__init__(master, width=round(w * self._dpi), height=round(28 * self._dpi), bg=master["bg"], highlightthickness=1,
                          highlightbackground=master["bg"], highlightcolor=_ACCENT,
                          takefocus=True, cursor="hand2")
         self._var = variable
         self._minimum, self._maximum = minimum, maximum
-        self._track_w = w
+        self._track_w = round(w * self._dpi)
         # 圆点半径为 9px，另留出 1px Canvas 高亮边框；避免最小/最大值时被裁切。
-        self._pad = 11
+        self._pad = round(11 * self._dpi)
         self.bind("<Button-1>", self._on_drag)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<Configure>", self._resize)
@@ -206,14 +218,15 @@ class Slider(tkinter.Canvas):
 
     def _draw(self) -> None:
         self.delete("all")
-        y = 13
+        p = lambda value: round(value * self._dpi)
+        y = p(13)
         x0, x1 = self._pad, self._track_w - self._pad
-        self.create_line(x0, y, x1, y, fill="#384D6D", width=5, capstyle="round")
+        self.create_line(x0, y, x1, y, fill="#384D6D", width=p(5), capstyle="round")
         px = x0 + int((x1 - x0) * self._pct())
         if px > x0:
-            self.create_line(x0, y, px, y, fill=_ACCENT, width=5, capstyle="round")
-        self.create_oval(px - 9, y - 9, px + 9, y + 9, fill=_ACCENT, outline="", tags="knob")
-        self.create_oval(px - 5, y - 5, px + 5, y + 5, fill="#E8F2FF", outline="", tags="knob_inner")
+            self.create_line(x0, y, px, y, fill=_ACCENT, width=p(5), capstyle="round")
+        self.create_oval(px - p(9), y - p(9), px + p(9), y + p(9), fill=_ACCENT, outline="", tags="knob")
+        self.create_oval(px - p(5), y - p(5), px + p(5), y + p(5), fill="#E8F2FF", outline="", tags="knob_inner")
 
     def _on_drag(self, ev) -> None:
         x0, x1 = self._pad, self._track_w - self._pad
@@ -227,7 +240,8 @@ class RoundedButton(tkinter.Canvas):
 
     def __init__(self, master, text: str, command, width=120, height=42, bg="#304766",
                  fg=_TEXT, active=_ACCENT, image=None, bold=False, anchor="center"):
-        super().__init__(master, width=width, height=height, bg=master["bg"],
+        self._dpi = _ui_scale(master)
+        super().__init__(master, width=round(width * self._dpi), height=round(height * self._dpi), bg=master["bg"],
                          highlightthickness=0, cursor="hand2", takefocus=True)
         self._text, self._command = text, command
         self._fill, self._fg, self._active = bg, fg, active
@@ -254,18 +268,20 @@ class RoundedButton(tkinter.Canvas):
     def _draw(self, hover=False) -> None:
         self.delete("all")
         w, h = max(2, self.winfo_width()), max(2, self.winfo_height())
-        self._surface = _surface(w, h, 8, self._active if hover else self._fill)
+        self._surface = _surface(w, h, round(8 * self._dpi), self._active if hover else self._fill)
         self.create_image(0, 0, image=self._surface, anchor="nw")
+        font_scale = float(getattr(self.winfo_toplevel(), "_v2t_font_scale", 1.0))
+        font = (_FONT, -round(14 * self._dpi * font_scale), "bold" if self._bold else "normal")
         if self._anchor == "w":
-            x = 18
+            x = round(18 * self._dpi)
             if self._icon is not None:
                 self.create_image(x, h // 2, image=self._icon, anchor="w")
-                x += 34
+                x += round(34 * self._dpi)
             self.create_text(x, h // 2, text=self._text, anchor="w", fill=self._fg,
-                             font=(_FONT, -14, "bold" if self._bold else "normal"))
+                             font=font)
         else:
             self.create_text(w // 2, h // 2, text=self._text, fill=self._fg,
-                             font=(_FONT, -14, "bold" if self._bold else "normal"))
+                             font=font)
 
     def _release(self, ev) -> None:
         was_pressed, self._pressed = self._pressed, False
@@ -277,21 +293,24 @@ class RoundedField(tkinter.Canvas):
     """带真实左内边距的圆角只读文本框。"""
 
     def __init__(self, master, variable: tkinter.StringVar):
-        super().__init__(master, height=42, bg=master["bg"], highlightthickness=0, takefocus=False)
+        self._dpi = _ui_scale(master)
+        p = lambda value: round(value * self._dpi)
+        super().__init__(master, height=p(42), bg=master["bg"], highlightthickness=0, takefocus=False)
         self.entry = tkinter.Entry(self, textvariable=variable, state="readonly",
                                    readonlybackground=_TRACK, fg=_TEXT,
                                    font=(_FONT, -15), relief="flat", bd=0)
-        self._window = self.create_window(13, 21, window=self.entry, anchor="w", height=30)
+        self._window = self.create_window(p(13), p(21), window=self.entry, anchor="w", height=p(30))
         self.bind("<Configure>", self._layout)
         self._layout()
 
     def _layout(self, _ev=None) -> None:
-        w = max(40, self.winfo_width())
-        self._surface = _surface(w, 42, 8, _TRACK, _CARD_EDGE)
+        p = lambda value: round(value * self._dpi)
+        w = max(p(40), self.winfo_width())
+        self._surface = _surface(w, p(42), p(8), _TRACK, _CARD_EDGE)
         self.delete("surface")
         self.create_image(0, 0, image=self._surface, anchor="nw", tags="surface")
         self.tag_lower("surface")
-        self.itemconfigure(self._window, width=max(10, w - 26))
+        self.itemconfigure(self._window, width=max(p(10), w - p(26)))
 
     def set_foreground(self, color: str) -> None:
         self.entry.config(fg=color)
@@ -325,12 +344,17 @@ def _normalize_combo(keysym: str, modifiers: set[str]) -> str | None:
 class SettingsWindow:
     """设置窗口。apply_cb(config_dict) 在保存时被调用（主线程），返回生效值供写盘。"""
 
+    def _px(self, value: float) -> int:
+        return round(value * self._dpi_scale)
+
     def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None,
-                 on_debug=None, on_update=None) -> None:
+                 on_debug=None, on_update=None, dpi_scale: float | None = None) -> None:
         self._apply_cb = apply_cb
         self._on_debug = on_debug
         self._on_update = on_update
         self._cfg = dict(cfg_dict)
+        self._dpi_scale = dpi_scale if dpi_scale is not None else system_scale()
+        p = self._px
         self._font_scale = float(self._cfg.get("font_scale", 1.0))
         self._font_widgets = []
         self._capturing = False
@@ -340,91 +364,96 @@ class SettingsWindow:
         self._nav = {}
         self._nav_images = {}
         self.root = tkinter.Toplevel()
+        # 窄屏上保持整套侧栏与页脚可用；高 DPI 倍率仍尽量接近系统设置。
+        self._dpi_scale = min(self._dpi_scale, max(1.0, self.root.winfo_screenwidth() / 984))
+        self.root._v2t_dpi_scale = self._dpi_scale
+        self.root._v2t_font_scale = self._font_scale
         self.root.title("语音输入 设置")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg=_WINDOW_KEY)
-        width = min(920, self.root.winfo_screenwidth() - 64)
-        height = min(840, self.root.winfo_screenheight() - 80)
-        self.root.geometry(f"{width}x{height}+{max(0, (self.root.winfo_screenwidth() - width) // 2)}+40")
+        width = min(p(920), self.root.winfo_screenwidth() - p(64))
+        height = min(p(840), self.root.winfo_screenheight() - p(80))
+        top = max(0, min(p(40), self.root.winfo_screenheight() - height))
+        self.root.geometry(f"{width}x{height}+{max(0, (self.root.winfo_screenwidth() - width) // 2)}+{top}")
         self.root.after_idle(self._apply_window_rounding)
 
         border = tkinter.Frame(self.root, bg=_CARD_EDGE)
         border.pack(fill="both", expand=True)
         shell = tkinter.Frame(border, bg=_BG)
-        shell.pack(fill="both", expand=True, padx=1, pady=1)
-        sidebar = tkinter.Frame(shell, bg=_SIDE, width=196)
+        shell.pack(fill="both", expand=True, padx=p(1), pady=p(1))
+        sidebar = tkinter.Frame(shell, bg=_SIDE, width=p(196))
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
         brand = tkinter.Frame(sidebar, bg=_SIDE)
-        brand.pack(fill="x", padx=24, pady=(32, 30))
+        brand.pack(fill="x", padx=p(24), pady=(p(32), p(30)))
         tkinter.Label(brand, text="语音输入", bg=_SIDE, fg=_TEXT,
                       font=(_FONT, -21, "bold")).pack(anchor="w")
         tkinter.Label(brand, text="设置", bg=_SIDE, fg=_SUB,
-                      font=(_FONT, -13)).pack(anchor="w", pady=(5, 0))
+                      font=(_FONT, -13)).pack(anchor="w", pady=(p(5), 0))
         for key, label in (("all", "常规"), ("hotkey", "快捷键"),
                            ("appearance", "外观"), ("features", "识别与校对")):
-            self._nav_images[key] = _nav_icon(key)
+            self._nav_images[key] = _nav_icon(key, self._dpi_scale)
             button = RoundedButton(
                 sidebar, label, command=lambda name=key: self._select_page(name),
                 width=172, height=52, bg=_SIDE, fg=_SUB, active="#304A70",
                 image=self._nav_images[key], anchor="w",
             )
-            button.pack(fill="x", padx=12, pady=3)
+            button.pack(fill="x", padx=p(12), pady=p(3))
             self._nav[key] = button
         tkinter.Label(sidebar, text="voice2text\n本地识别 · 离线运行", justify="left",
-                      bg=_SIDE, fg=_SUB, font=(_FONT, -12)).pack(side="bottom", anchor="w", padx=24, pady=24)
-        tkinter.Frame(shell, bg=_CARD_EDGE, width=1).pack(side="left", fill="y")
+                      bg=_SIDE, fg=_SUB, font=(_FONT, -12)).pack(side="bottom", anchor="w", padx=p(24), pady=p(24))
+        tkinter.Frame(shell, bg=_CARD_EDGE, width=p(1)).pack(side="left", fill="y")
         main = tkinter.Frame(shell, bg=_BG)
         main.pack(side="left", fill="both", expand=True)
 
-        tb = tkinter.Canvas(main, height=32, bg=_BG, highlightthickness=0)
+        tb = tkinter.Canvas(main, height=p(32), bg=_BG, highlightthickness=0)
         tb.pack(fill="x")
         self._tb = tb
         self._tb_off = None
         def titlebar(ev):
             tb.delete("all")
-            cx = ev.width - 24
-            tb.create_line(cx - 5, 11, cx + 5, 21, fill=_SUB, width=1.5)
-            tb.create_line(cx - 5, 21, cx + 5, 11, fill=_SUB, width=1.5)
-            tb.create_rectangle(cx - 17, 0, cx + 17, 32, fill="", outline="", tags="close")
+            cx = ev.width - p(24)
+            tb.create_line(cx - p(5), p(11), cx + p(5), p(21), fill=_SUB, width=p(1.5))
+            tb.create_line(cx - p(5), p(21), cx + p(5), p(11), fill=_SUB, width=p(1.5))
+            tb.create_rectangle(cx - p(17), 0, cx + p(17), p(32), fill="", outline="", tags="close")
             tb.tag_bind("close", "<Button-1>", lambda e: self._close())
         tb.bind("<Configure>", titlebar)
         tb.bind("<ButtonPress-1>", self._tb_press)
         tb.bind("<B1-Motion>", self._tb_motion)
         heading = tkinter.Frame(main, bg=_BG)
-        heading.pack(fill="x", padx=28, pady=(0, 12))
+        heading.pack(fill="x", padx=p(28), pady=(0, p(12)))
         self._heading = tkinter.Label(heading, text="常规", bg=_BG, fg=_TEXT, font=(_FONT, -24, "bold"))
         self._heading.pack(anchor="w")
         self._subtitle = tkinter.Label(heading, text="自定义语音输入的使用体验", bg=_BG, fg=_SUB, font=(_FONT, -13))
-        self._subtitle.pack(anchor="w", pady=(4, 0))
+        self._subtitle.pack(anchor="w", pady=(p(4), 0))
 
         # 页脚固定在滚动区外，小屏幕也始终能保存或取消。
         footer = tkinter.Frame(main, bg=_BG)
-        footer.pack(side="bottom", fill="x", padx=28, pady=16)
+        footer.pack(side="bottom", fill="x", padx=p(28), pady=p(16))
         tkinter.Label(footer, text="更改将在保存后生效", bg=_BG, fg=_SUB,
                       font=(_FONT, -12)).pack(side="left")
         if self._on_debug:
             RoundedButton(footer, "运行输出", self._open_debug, width=88, height=40,
-                          bg=_CARD, fg=_SUB, active="#304A70").pack(side="left", padx=(18, 0))
+                          bg=_CARD, fg=_SUB, active="#304A70").pack(side="left", padx=(p(18), 0))
         self._save_btn = RoundedButton(footer, "保存并应用", self._save, width=124, height=44,
                                        bg=_ACCENT, fg="#FFFFFF", active="#70AEFF", bold=True)
         self._save_btn.pack(side="right")
         RoundedButton(footer, "取消", self._close, width=74, height=44,
-                      bg=_BG, fg=_SUB, active=_CARD).pack(side="right", padx=(0, 8))
+                      bg=_BG, fg=_SUB, active=_CARD).pack(side="right", padx=(0, p(8)))
 
         viewport = tkinter.Frame(main, bg=_BG)
-        viewport.pack(fill="both", expand=True, padx=(28, 16))
+        viewport.pack(fill="both", expand=True, padx=(p(28), p(16)))
         self._scroll = tkinter.Canvas(viewport, bg=_BG, highlightthickness=0)
-        bar = tkinter.Canvas(viewport, width=10, bg=_BG, highlightthickness=0)
+        bar = tkinter.Canvas(viewport, width=p(10), bg=_BG, highlightthickness=0)
         bar.pack(side="right", fill="y")
         self._scroll.pack(side="left", fill="both", expand=True)
         def scrollbar(first, last):
             bar.delete("all")
             if float(last) - float(first) < 0.999:
                 h = bar.winfo_height()
-                bar.create_line(5, max(4, float(first) * h), 5, min(h - 4, float(last) * h),
-                                fill="#536987", width=4, capstyle="round")
+                bar.create_line(p(5), max(p(4), float(first) * h), p(5), min(h - p(4), float(last) * h),
+                                fill="#536987", width=p(4), capstyle="round")
         def scroll_to(ev):
             first, last = self._scroll.yview()
             self._scroll.yview_moveto(ev.y / max(1, bar.winfo_height()) - (last - first) / 2)
@@ -434,7 +463,7 @@ class SettingsWindow:
         self._scroll.configure(yscrollcommand=scrollbar)
         body = tkinter.Frame(self._scroll, bg=_BG)
         item = self._scroll.create_window(0, 0, window=body, anchor="nw")
-        self._scroll.bind("<Configure>", lambda e: self._scroll.itemconfigure(item, width=e.width - 4))
+        self._scroll.bind("<Configure>", lambda e: self._scroll.itemconfigure(item, width=e.width - p(4)))
         body.bind("<Configure>", lambda e: self._scroll.configure(scrollregion=self._scroll.bbox("all")))
         self.root.bind("<MouseWheel>", self._wheel)
 
@@ -446,18 +475,18 @@ class SettingsWindow:
                           font=(_FONT, -15, "bold")).pack(anchor="w")
             if subtitle:
                 tkinter.Label(content, text=subtitle, bg=_CARD, fg=_SUB,
-                              font=(_FONT, -12)).pack(anchor="w", pady=(3, 8))
+                              font=(_FONT, -12)).pack(anchor="w", pady=(p(3), p(8)))
             return content
 
         c1 = card("hotkey", "快捷键", "按下快捷键，开始或停止语音输入")
         row = tkinter.Frame(c1, bg=_CARD)
-        row.pack(fill="x", pady=(0, 2))
+        row.pack(fill="x", pady=(0, p(2)))
         self._hotkey_var = tkinter.StringVar(value=self._display_combo(self._cfg["hotkey"]))
         self._hotkey_entry = RoundedField(row, self._hotkey_var)
         self._hotkey_entry.pack(side="left", fill="x", expand=True)
         self._hotkey_btn = RoundedButton(row, "修改", self._start_capture,
                                          width=72, height=42, bg="#304766", active=_ACCENT)
-        self._hotkey_btn.pack(side="left", padx=(10, 0))
+        self._hotkey_btn.pack(side="left", padx=(p(10), 0))
 
         c2 = card("appearance", "悬浮窗设置", "调整大小与不透明度，在下方预览效果")
         self._scale_var = tkinter.DoubleVar(value=round(float(self._cfg.get("widget_scale", 1.0)) * 100))
@@ -471,7 +500,7 @@ class SettingsWindow:
                                       ("不透明度", self._opacity_var, 30, 100, "%"),
                                       ("界面字体", self._font_var, 85, 135, "%")):
             row = tkinter.Frame(c2, bg=_CARD)
-            row.pack(fill="x", pady=2)
+            row.pack(fill="x", pady=p(2))
             tkinter.Label(row, text=label, bg=_CARD, fg=_TEXT, width=9, anchor="w",
                           font=(_FONT, -13)).pack(side="left")
             pct = tkinter.StringVar(value=(f"{var.get():.0f}%" if suffix else f"{var.get() / 100:.2f}"))
@@ -479,12 +508,12 @@ class SettingsWindow:
             tkinter.Label(row, textvariable=pct, bg=_CARD, fg=_SUB, width=5, anchor="e",
                           font=(_FONT, -13)).pack(side="right")
             slider = Slider(row, var, minimum=low, maximum=high)
-            slider.pack(side="left", fill="x", expand=True, padx=(6, 14))
+            slider.pack(side="left", fill="x", expand=True, padx=(p(6), p(14)))
             self._sliders.append(slider)
             var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
         self._font_var.trace_add("write", lambda *_: self._set_font_scale(self._font_var.get() / 100))
-        self._preview = tkinter.Canvas(c2, height=118, bg=_CARD, highlightthickness=0)
-        self._preview.pack(fill="x", pady=(6, 0))
+        self._preview = tkinter.Canvas(c2, height=p(118), bg=_CARD, highlightthickness=0)
+        self._preview.pack(fill="x", pady=(p(6), 0))
         self._preview.bind("<Configure>", lambda e: self._draw_preview())
 
         c3 = card("features", "功能设置", "")
@@ -494,23 +523,23 @@ class SettingsWindow:
             value=bool(self._cfg.get("proofread_enabled", True)) and proofread_ready
         )
         model_row = tkinter.Frame(c3, bg=_CARD)
-        model_row.pack(fill="x", pady=(4, 12))
+        model_row.pack(fill="x", pady=(p(4), p(12)))
         self._model_status = tkinter.StringVar()
         tkinter.Label(model_row, textvariable=self._model_status, bg=_CARD, fg=_SUB,
-                      font=(_FONT, -12), wraplength=440, justify="left").pack(side="left", fill="x", expand=True)
+                      font=(_FONT, -12), wraplength=p(440), justify="left").pack(side="left", fill="x", expand=True)
         self._download_button = RoundedButton(model_row, text="下载校对模型 · 1.1 GB",
                       command=self._download_model, bg=_TRACK, fg=_TEXT, width=210, height=38)
         self._download_button.pack(side="right")
         self._poll_model_download()
         mic_row = tkinter.Frame(c3, bg=_CARD)
-        mic_row.pack(fill="x", pady=(4, 8))
+        mic_row.pack(fill="x", pady=(p(4), p(8)))
         tkinter.Label(mic_row, text="输入设备", bg=_CARD, fg=_TEXT,
                       font=(_FONT, -14)).pack(anchor="w")
         tkinter.Label(
             mic_row,
             text="可指定真实麦克风；设备列表会在每次听写时重新解析，适配热插拔。",
             bg=_CARD, fg=_SUB, font=(_FONT, -12),
-        ).pack(anchor="w", pady=(2, 5))
+        ).pack(anchor="w", pady=(p(2), p(5)))
         from voice2text.capture import list_input_device_choices
         self._mic_selector_by_label = {"（系统默认）": ""}
         try:
@@ -519,7 +548,7 @@ class SettingsWindow:
             )
         except Exception as exc:  # noqa: BLE001 —— 枚举失败时仍允许保存默认设备
             tkinter.Label(mic_row, text=f"无法读取设备列表：{exc}", bg=_CARD,
-                          fg=_SUB, font=(_FONT, -11), wraplength=450,
+                          fg=_SUB, font=(_FONT, -11), wraplength=p(450),
                           justify="left").pack(anchor="w")
         saved_selector = str(self._cfg.get("input_device", "") or "")
         selected_label = next(
@@ -549,10 +578,10 @@ class SettingsWindow:
             ("开机自启动", "随系统启动，随时开始听写", self._autostart_var),
         ):
             row = tkinter.Frame(c3, bg=_CARD)
-            row.pack(fill="x", pady=(7, 1))
+            row.pack(fill="x", pady=(p(7), p(1)))
             value_label = tkinter.Label(row, text="开" if var.get() else "关", bg=_CARD,
                                         fg=_SUB, width=2, font=(_FONT, -12))
-            value_label.pack(side="right", padx=(8, 0))
+            value_label.pack(side="right", padx=(p(8), 0))
             if label == "开启二次校对":
                 command = lambda text=value_label: self._proofread_toggle_changed(text)
             else:
@@ -560,27 +589,27 @@ class SettingsWindow:
             toggle = Toggle(row, var, command=command)
             if label == "开启二次校对":
                 self._proof_toggle = toggle
-            toggle.pack(side="right", padx=(16, 0))
+            toggle.pack(side="right", padx=(p(16), 0))
             self._toggles.append(toggle)
             box = tkinter.Frame(row, bg=_CARD)
             box.pack(side="left", fill="x", expand=True)
             tkinter.Label(box, text=label, bg=_CARD, fg=_TEXT, font=(_FONT, -14)).pack(anchor="w")
-            tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB, font=(_FONT, -12)).pack(anchor="w", pady=(2, 0))
+            tkinter.Label(box, text=sub, bg=_CARD, fg=_SUB, font=(_FONT, -12)).pack(anchor="w", pady=(p(2), 0))
 
         update_row = tkinter.Frame(c3, bg=_CARD)
-        update_row.pack(fill="x", pady=(18, 2))
+        update_row.pack(fill="x", pady=(p(18), p(2)))
         update_box = tkinter.Frame(update_row, bg=_CARD)
         update_box.pack(side="left", fill="x", expand=True)
         tkinter.Label(update_box, text=f"软件更新 · 当前 v{__version__}", bg=_CARD, fg=_TEXT,
                       font=(_FONT, -14)).pack(anchor="w")
         self._update_status = tkinter.StringVar(value="可手动检查 GitHub 正式版本")
         tkinter.Label(update_box, textvariable=self._update_status, bg=_CARD, fg=_SUB,
-                      font=(_FONT, -12), wraplength=390, justify="left").pack(anchor="w", pady=(2, 0))
+                      font=(_FONT, -12), wraplength=p(390), justify="left").pack(anchor="w", pady=(p(2), 0))
         self._update_button = RoundedButton(
             update_row, "检查更新", self._update_clicked,
             bg=_TRACK, fg=_TEXT, width=150, height=38,
         )
-        self._update_button.pack(side="right", padx=(12, 0))
+        self._update_button.pack(side="right", padx=(p(12), 0))
         self._poll_update()
         self._record_font_widgets()
         self._set_font_scale(self._font_scale)
@@ -669,7 +698,7 @@ class SettingsWindow:
             self.root.attributes("-transparentcolor", _WINDOW_KEY)
         except tkinter.TclError:
             return
-        r = _WINDOW_RADIUS
+        r = self._px(_WINDOW_RADIUS)
         specs = (
             (0.0, 0.0, "nw", (0, 0, r * 2, r * 2), _SIDE),
             (1.0, 0.0, "ne", (-r, 0, r, r * 2), _BG),
@@ -699,7 +728,7 @@ class SettingsWindow:
         for name, panel in self._cards.items():
             panel.pack_forget()
             if key == "all" or name == key:
-                panel.pack(fill="x", pady=(0, 10))
+                panel.pack(fill="x", pady=(0, self._px(10)))
         self.root.update_idletasks()
         self._scroll.configure(scrollregion=self._scroll.bbox("all"))
         self._scroll.yview_moveto(0)
@@ -723,7 +752,7 @@ class SettingsWindow:
                     f = tkfont.Font(font=spec)
                     size = abs(int(f.cget("size")))
                     if size:
-                        self._font_widgets.append((widget, f.cget("family"), size / max(self._font_scale, 0.01),
+                        self._font_widgets.append((widget, f.cget("family"), size,
                                                    f.cget("weight"), f.cget("slant"),
                                                    f.cget("underline"), f.cget("overstrike")))
             except (tkinter.TclError, TypeError):
@@ -734,12 +763,19 @@ class SettingsWindow:
 
     def _set_font_scale(self, value: float) -> None:
         self._font_scale = max(0.85, min(1.35, float(value)))
+        self.root._v2t_font_scale = self._font_scale
         for widget, family, base, weight, slant, underline, overstrike in self._font_widgets:
             try:
-                widget.configure(font=(family, -max(8, round(base * self._font_scale)), weight,
+                widget.configure(font=(family, -max(self._px(8), self._px(base * self._font_scale)), weight,
                                        slant, underline, overstrike))
             except tkinter.TclError:
                 pass
+        def redraw_buttons(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, RoundedButton):
+                    child._draw()
+                redraw_buttons(child)
+        redraw_buttons(self.root)
 
     def _open_debug(self) -> None:
         if self._on_debug:
@@ -757,7 +793,7 @@ class SettingsWindow:
         if self._preview_source is not None:
             # 与实际悬浮窗共用同一帧；先按目标比例居中裁切，避免把内容横向压扁。
             source = self._preview_source
-            height = max(1, round(104 * self._scale_var.get() / 100 * 0.6))
+            height = max(1, self._px(104 * self._scale_var.get() / 100 * 0.6))
             aspect = self._aspect_var.get() / 100
             width = max(1, round(height * aspect))
             source_aspect = source.width / source.height

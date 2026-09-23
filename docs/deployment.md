@@ -28,6 +28,10 @@ python -m venv .venv
   Release，下载同版本 Windows x64 ZIP 与 `.sha256`，通过摘要和压缩包安全检查后才允许安装。
   更新器等待当前进程退出再覆盖独立运行时，保留 `config.json` 和 `models/llm/`，完成后自动重启。
   源码开发环境没有 `offline-bundle.txt`，因此只显示说明，不执行自更新。
+- 分发包根目录另有面向 agent 的 `AGENTS.md`、干净源码基线 `source-baseline.zip` 和
+  `scripts/export_feedback.py`。用户在分发端修复后可用包内 Python 运行导出脚本，生成
+  `feedback/` 下的 `反馈.md` 与 `修复.diff`。导出范围仅限发行白名单源码与脚本，
+  不自动采集配置、模型、录音或日志；发送前仍须人工检查隐私。开发仓库的治理文档不复制进分发版。
 
 ### 制作离线分发包
 
@@ -42,10 +46,8 @@ python -m venv .venv
 发布资产已通过摘要、ZIP CRC、目录结构、包内运行时依赖及语音/标点模型加载验证；GitHub
 Release 标签指向提交 `3398b12`。
 
-代码版本已提升为 `0.1.4`，用于打包 `v0.1.3` 之后的识别流就绪握手、准备期音频缓存和
-悬浮窗错误态自动复位。候选资产大小为 471,765,865 字节，SHA-256 为
-`67678f6a241e690390ba94e6bc4fb3cacbba6ce11ff834c24966008a51f7b250`；已通过摘要、CRC、
-目录结构、包内运行时依赖及语音/标点模型加载验证，尚未发布为 GitHub Release。
+代码版本已提升为 `0.1.4`，用于打包 `v0.1.3` 之后的识别流就绪握手、准备期音频缓存、
+悬浮窗错误态自动复位、系统 DPI 缩放与分发端诊断能力。候选资产尚未发布为 GitHub Release。
 
 构建结构检查：`python scripts/check_release.py`。一键更新回归：`python scripts/check_update.py`。
 模型下载回归：

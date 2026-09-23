@@ -1,7 +1,7 @@
 """托盘图标：Pillow 按美术稿绘制麦克风剪影，四种状态配色。
 
 状态映射（assets/托盘图标形状.jpg）：
-- idle      白色（待命）
+- idle      深蓝底上的白色麦克风（待命）
 - listening 蓝色+声波（识别中）
 - recording 红色+右上角圆点（录音/听写中）
 - error     灰色+斜杠（不可用）
@@ -16,12 +16,14 @@ from PIL import Image, ImageDraw
 COLOR_IDLE = "#F2F5F9"
 COLOR_LISTEN = "#4C9DF8"
 COLOR_RECORD = "#FA5A52"
-COLOR_ERROR = "#76808E"
+COLOR_ERROR = "#B8C4D3"
+BADGE_FILL = "#16243D"
+BADGE_EDGE = "#67ACF5"
 
 _TRANSPARENT = (0, 0, 0, 0)
 
 
-def draw_icon(state: str = "idle", size: int = 64) -> Image.Image:
+def draw_icon(state: str = "idle", size: int = 64, badge: bool = True) -> Image.Image:
     """绘制指定状态的托盘图标。size 为边长（正方形）。"""
     img = Image.new("RGBA", (size * 4, size * 4), _TRANSPARENT)
     d = ImageDraw.Draw(img)
@@ -33,6 +35,11 @@ def draw_icon(state: str = "idle", size: int = 64) -> Image.Image:
         "recording": COLOR_RECORD,
         "error": COLOR_ERROR,
     }.get(state, COLOR_IDLE)
+
+    # 托盘背景随 Windows 深浅模式变化；固定深蓝底保证白色待命图标在浅色任务栏可见。
+    if badge:
+        d.rounded_rectangle([2 * s, 2 * s, 62 * s, 62 * s], radius=16 * s,
+                            fill=BADGE_FILL, outline=BADGE_EDGE, width=max(2, round(2 * s)))
 
     lw = max(2, round(6 * s))
     # 麦克风主体：胶囊形

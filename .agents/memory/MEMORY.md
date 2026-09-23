@@ -8,14 +8,16 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-09-23 13:42
+> 最近重建：2026-09-23 14:15
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-09-15 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [高 DPI 屏幕上悬浮窗和设置界面偏小](../../docs/problems/bugfix/desktop-ui-too-small-at-high-dpi.md) — fixed · medium · active · 更新于 2026-09-23
+- [白色托盘图标在浅色任务栏上难以辨认](../../docs/problems/bugfix/tray-icon-invisible-on-light-taskbar.md) — fixed · low · active · 更新于 2026-09-23
+- [微信富文本输入框会话中断与锁句标点误覆盖](../../docs/problems/bugfix/weixin-volatile-input-and-punctuation-gate.md) — investigating · high · active · 更新于 2026-09-23
 - [录音使用系统静音默认设备而非真实麦克风](../../docs/problems/bugfix/selected-microphone-defaulted-to-silent-device.md) — fixed · high · active · 更新于 2026-09-23
-- [微信富文本输入框会话中断与锁句标点误覆盖](../../docs/problems/bugfix/weixin-volatile-input-and-punctuation-gate.md) — investigating · high · active · 更新于 2026-09-21
 - [识别流尚未就绪时悬浮窗提前显示正在聆听](../../docs/problems/bugfix/listening-before-asr-ready.md) — fixed · high · active · 更新于 2026-09-23
 - [悬浮窗不可用状态不会自动恢复](../../docs/problems/bugfix/widget-error-state-sticky.md) — fixed · low · active · 更新于 2026-09-23
 - [调试录音在退出后可能残留于磁盘](../../docs/problems/bugfix/debug-audio-cleanup.md) — fixed · high · active · 更新于 2026-09-22

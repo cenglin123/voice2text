@@ -9,6 +9,7 @@ from ctypes import wintypes
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from voice2text import layered
+from voice2text.dpi import system_scale
 
 SS = 3
 WIDTH = 308
@@ -76,6 +77,7 @@ class TrayMenu:
 
     def __init__(self, master, app, command) -> None:
         self.app = app
+        self._dpi_scale = system_scale()
         self.font_scale = max(0.85, min(1.35, float(getattr(app, "font_scale", 1.0))))
         self.command = command
         self.rows = [
@@ -85,13 +87,15 @@ class TrayMenu:
             ("terminal", lambda: "运行输出", "debug"),
             ("exit", lambda: "退出", "quit"),
         ]
-        self.height = PAD * 2 + TOP_H + ROW_H * len(self.rows) + 8
+        self._logical_height = PAD * 2 + TOP_H + ROW_H * len(self.rows) + 8
+        self.width = round(WIDTH * self._dpi_scale)
+        self.height = round(self._logical_height * self._dpi_scale)
         self.root = tkinter.Toplevel(master)
         self.root.withdraw()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.geometry(f"{WIDTH}x{self.height}")
-        self.canvas = tkinter.Canvas(self.root, width=WIDTH, height=self.height,
+        self.root.geometry(f"{self.width}x{self.height}")
+        self.canvas = tkinter.Canvas(self.root, width=self.width, height=self.height,
                                      bg="#10161F", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.root.update_idletasks()
@@ -119,9 +123,10 @@ class TrayMenu:
         else:
             left, top = 0, 0
             right, bottom = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.x = max(left + 8, min(x - WIDTH, right - WIDTH - 8))
-        self.y = max(top + 8, min(y - self.height - 8, bottom - self.height - 8))
-        self.root.geometry(f"{WIDTH}x{self.height}+{self.x}+{self.y}")
+        margin = round(8 * self._dpi_scale)
+        self.x = max(left + margin, min(x - self.width, right - self.width - margin))
+        self.y = max(top + margin, min(y - self.height - margin, bottom - self.height - margin))
+        self.root.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
         _user.GetAsyncKeyState(0x01)  # 清除上一次点击的低位状态，避免重开后立即收起
         self.root.deiconify()
         self.visible = True
@@ -143,6 +148,7 @@ class TrayMenu:
             self._render()
 
     def _row_at(self, y: int) -> int:
+        y = int(y / self._dpi_scale)
         if PAD <= y < PAD + TOP_H:
             return 0
         start = PAD + TOP_H
@@ -169,11 +175,11 @@ class TrayMenu:
         self.root.after(50, self._poll)
 
     def _render(self) -> None:
-        W, H = WIDTH * SS, self.height * SS
+        W, H = WIDTH * SS, self._logical_height * SS
         image = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         sd = ImageDraw.Draw(shadow)
-        box = [PAD * SS, PAD * SS, (WIDTH - PAD) * SS - 1, (self.height - PAD) * SS - 1]
+        box = [PAD * SS, PAD * SS, (WIDTH - PAD) * SS - 1, (self._logical_height - PAD) * SS - 1]
         sd.rounded_rectangle([v + 3 * SS for v in box], radius=16 * SS, fill=(0, 0, 0, 125))
         shadow = shadow.filter(ImageFilter.GaussianBlur(6 * SS))
         image.alpha_composite(shadow)
@@ -210,7 +216,7 @@ class TrayMenu:
                 line_y = y0 + ROW_H * SS
                 d.line([26 * SS, line_y, (WIDTH - 26) * SS, line_y], fill=(61, 73, 91, 180), width=SS)
 
-        small = image.resize((WIDTH, self.height), Image.Resampling.LANCZOS)
+        small = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
         self._last_image = small
         if self.visible:
             layered.update(self.hwnd, small, self.x, self.y)

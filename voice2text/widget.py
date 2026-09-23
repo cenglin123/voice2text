@@ -17,6 +17,7 @@ import tkinter
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageFilter, ImageChops
 
 from voice2text import layered
+from voice2text.dpi import enable_system_dpi_awareness, system_scale
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 104
@@ -81,7 +82,9 @@ class DictationWidget:
         on_quit=None,
         on_resize=None,
     ) -> None:
-        self._scale = scale
+        enable_system_dpi_awareness()
+        self._dpi_scale = system_scale()
+        self._scale = scale * self._dpi_scale
         self._aspect = max(MIN_ASPECT, min(MAX_ASPECT, aspect))
         self._opacity = opacity
         self._on_toggle = on_toggle
@@ -92,19 +95,12 @@ class DictationWidget:
         self._state = "idle"
         self._error_reset_job = None
         self._phase = 0.0
-        try:  # 高 DPI 模糊缓解——必须早于首个窗口创建（进程级设置）
-            import ctypes
-
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except Exception:  # noqa: BLE001
-            pass
-
         self.root = tkinter.Tk()
         self.root.withdraw()
         self.root.title("voice2text")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self._h = round(BASE_H * scale)
+        self._h = round(BASE_H * self._scale)
         self._w = round(self._h * self._aspect)
         self.root.geometry(f"{self._w}x{self._h}+60+60")
         self._opacity_pct = int(round(opacity * 255))
@@ -413,7 +409,8 @@ class DictationWidget:
             return
         if self._resizing:
             x0, y0, w0, h0 = self._resize_origin
-            wanted_h = max(round(BASE_H * 0.5), min(round(BASE_H * 1.5), h0 + ev.y_root - y0))
+            wanted_h = max(round(BASE_H * 0.5 * self._dpi_scale),
+                           min(round(BASE_H * 1.5 * self._dpi_scale), h0 + ev.y_root - y0))
             wanted_w = max(round(wanted_h * MIN_ASPECT), min(round(wanted_h * MAX_ASPECT), w0 + ev.x_root - x0))
             self._scale = wanted_h / BASE_H
             self._aspect = wanted_w / wanted_h
@@ -431,7 +428,7 @@ class DictationWidget:
 
     def _on_release(self, ev) -> None:
         if self._resizing and self._drag_moved and self._on_resize:
-            self._on_resize(self._scale, self._aspect)
+            self._on_resize(self._scale / self._dpi_scale, self._aspect)
         if not self._resizing and not self._drag_moved and self._drag_off is not None:
             kind = self._hit(ev.x, ev.y)
             if kind == "gear" and self._on_settings:
@@ -495,14 +492,14 @@ class DictationWidget:
 
     def apply_appearance(self, scale: float, opacity: float, aspect: float | None = None) -> None:
         """主线程调用：调整大小与透明度并重绘。"""
-        self._scale = scale
+        self._scale = scale * self._dpi_scale
         if aspect is not None:
             self._aspect = max(MIN_ASPECT, min(MAX_ASPECT, aspect))
         self._opacity = opacity
         self._opacity_pct = int(round(opacity * 255))
         if not self._layered:
             self.root.attributes("-alpha", opacity)
-        height = round(BASE_H * scale)
+        height = round(BASE_H * self._scale)
         self._resize_surface(round(height * self._aspect), height)
 
     def run_tick(self, tick, interval_ms: int = 30) -> None:

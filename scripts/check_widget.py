@@ -191,6 +191,24 @@ def main() -> None:
             widget.root.destroy()
     print("PASS unsupported blur -> ordinary layered surface")
 
+    with patch("voice2text.widget.system_scale", return_value=1.5):
+        resized = []
+        widget = DictationWidget(on_resize=lambda scale, aspect: resized.append((scale, aspect)))
+        try:
+            assert widget.snapshot().size == (510, 156)
+            widget.apply_appearance(1.0, 0.92, 1.0)
+            assert widget.snapshot().size == (156, 156)
+            widget._on_press(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
+                                             x_root=500, y_root=500))
+            widget._on_motion(SimpleNamespace(x=widget._w - 2, y=widget._h - 2,
+                                              x_root=530, y_root=515))
+            widget._on_release(SimpleNamespace(x=widget._w - 2, y=widget._h - 2))
+            assert resized and 1.0 < resized[-1][0] < 1.2
+            assert widget._w == round(widget._h * resized[-1][1])
+        finally:
+            widget.root.destroy()
+    print("PASS 150% DPI widget size and drag-to-settings scale")
+
 
 if __name__ == "__main__":
     main()

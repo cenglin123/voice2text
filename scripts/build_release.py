@@ -21,14 +21,15 @@ TEXT_FILES = (
 ASSET_FILES = ("voice2text.ico",)
 PACKAGE_FILES = tuple(f"voice2text/{name}.py" for name in (
     "__init__", "activity", "asr", "capture", "clipboard_tx", "config", "desktop",
-    "diagnostics", "hotkey", "input", "keysender", "layered", "main", "model_download",
+    "diagnostics", "dpi", "hotkey", "input", "keysender", "layered", "main", "model_download",
     "performance", "proofread", "punctuation", "settings_window", "target", "tray",
     "tray_menu", "trayicon", "update", "widget",
 ))
 SCRIPT_FILES = (
     "scripts/apply_update.ps1", "scripts/create_shortcut.py",
-    "scripts/download_models.py", "scripts/verify_install.py",
+    "scripts/download_models.py", "scripts/export_feedback.py", "scripts/verify_install.py",
 )
+AGENT_GUIDE_SOURCE = ROOT / "scripts/release_agent_guide.md"
 FORBIDDEN_PARTS = (".git", ".venv", "__pycache__")
 
 
@@ -71,6 +72,9 @@ def _installation_guide(offline: bool) -> str:
         "- 可从设置页或托盘菜单打开“运行输出”。\n"
         "- 高级调试可运行：run.bat --debug\n"
         "- 若快捷键在管理员权限窗口中无响应，请以相同权限运行 voice2text。\n\n"
+        "【Agent 排查】\n"
+        "分发包根目录的 AGENTS.md 包含排查步骤与反馈导出方法；可生成反馈.md 和修复.diff，"
+        "无需 Git，发送前请检查隐私信息。\n\n"
         "项目主页：https://github.com/cenglin123/voice2text\n"
         "问题反馈：https://github.com/cenglin123/voice2text/issues\n"
     )
@@ -82,10 +86,20 @@ def _copy_runtime_files(stage: Path) -> None:
         target = stage / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    shutil.copy2(AGENT_GUIDE_SOURCE, stage / "AGENTS.md")
     (stage / "config.json").write_text(
         json.dumps(_default_config(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
     )
     (stage / "安装说明.txt").write_text(_installation_guide(False), encoding="utf-8")
+
+
+def _write_source_baseline(stage: Path) -> None:
+    """给分发端反馈工具保留可编辑源码原样，绝不纳入配置、模型和运行时。"""
+    with zipfile.ZipFile(stage / "source-baseline.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+        for rel in sorted((*TEXT_FILES, *SCRIPT_FILES, *PACKAGE_FILES, "AGENTS.md")):
+            info = zipfile.ZipInfo(rel, (2020, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, (stage / rel).read_bytes())
 
 
 def _copy_wheel(stage: Path, wheel: Path) -> None:
@@ -139,6 +153,7 @@ def build_release(output_dir: Path, wheel: Path, runtime: Path | None = None,
         stage = Path(tmp) / release_name
         stage.mkdir()
         _copy_runtime_files(stage)
+        _write_source_baseline(stage)
         if runtime is None:
             _copy_wheel(stage, wheel)
         else:

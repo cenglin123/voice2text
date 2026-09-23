@@ -20,7 +20,7 @@ def main() -> int:
         (8, 8, size - 8, size - 8), radius=58,
         fill="#16243D", outline="#4C9DF8", width=10,
     )
-    microphone = draw_icon("idle", 172)
+    microphone = draw_icon("idle", 172, badge=False)
     image.alpha_composite(microphone, ((size - 172) // 2, (size - 172) // 2))
     image.save(
         ROOT / "voice2text.ico", format="ICO",

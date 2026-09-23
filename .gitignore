@@ -12,4 +12,5 @@ debug_capture.wav
 *.lnk
 .env
 dist/
+feedback/
 vendor/*.whl

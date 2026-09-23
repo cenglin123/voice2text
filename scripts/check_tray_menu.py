@@ -10,12 +10,14 @@ import tkinter
 import time
 import queue
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from PIL import ImageGrab
+from PIL import Image, ImageDraw, ImageGrab
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from voice2text.tray_menu import PAD, TOP_H, ROW_H, WIDTH, TrayMenu
 from voice2text.tray import build_tray
+from voice2text.trayicon import draw_icon
 
 
 def post_click(hwnd: int, x: int, y: int, root) -> None:
@@ -41,6 +43,7 @@ def main():
     parser.add_argument("--screen-capture", type=Path)
     parser.add_argument("--tray-lifecycle", action="store_true")
     parser.add_argument("--physical-click", action="store_true")
+    parser.add_argument("--icon-preview", type=Path)
     args = parser.parse_args()
     root = tkinter.Tk()
     root.withdraw()
@@ -102,6 +105,28 @@ def main():
         icon.stop()
         icon._thread.join(timeout=2)
         assert not icon._thread.is_alive() and not icon._running
+    if args.icon_preview:
+        preview = Image.new("RGB", (440, 168), "white")
+        draw = ImageDraw.Draw(preview)
+        draw.rectangle((0, 84, 439, 167), fill="#20242D")
+        for row, y in enumerate((24, 108)):
+            for column, state in enumerate(("idle", "recording", "listening", "error")):
+                icon = draw_icon(state, 32)
+                preview.paste(icon, (30 + column * 105, y), icon)
+        args.icon_preview.parent.mkdir(parents=True, exist_ok=True)
+        preview.save(args.icon_preview)
+    with patch("voice2text.tray_menu.system_scale", return_value=1.5):
+        root = tkinter.Tk()
+        root.withdraw()
+        menu = TrayMenu(root, app, lambda _: None)
+        try:
+            assert menu.width == round(WIDTH * 1.5)
+            assert menu._last_image.size == (menu.width, menu.height)
+            assert menu._row_at(round((PAD + TOP_H // 2) * 1.5)) == 0
+            assert menu._row_at(round((PAD + TOP_H + ROW_H * 2 + 4) * 1.5)) == 3
+        finally:
+            menu.root.destroy()
+            root.destroy()
     print("PASS custom tray menu layout, alpha corners, hit rows and dynamic action")
 
 

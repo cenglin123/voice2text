@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import io
 import shutil
+import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -41,6 +44,19 @@ def main() -> int:
             assert archive.read(prefix + "voice2text.ico").startswith(b"\x00\x00\x01\x00")
             assert prefix + "voice2text/main.py" in names
             assert prefix + "scripts/apply_update.ps1" in names
+            assert prefix + "scripts/export_feedback.py" in names
+            assert prefix + "AGENTS.md" in names
+            assert prefix + "source-baseline.zip" in names
+            guide_agent = archive.read(prefix + "AGENTS.md").decode("utf-8")
+            assert "source-baseline.zip" in guide_agent and "export_feedback.py" in guide_agent
+            with zipfile.ZipFile(io.BytesIO(archive.read(prefix + "source-baseline.zip"))) as baseline:
+                source_paths = baseline.namelist()
+                assert "voice2text/target.py" in source_paths
+                assert "scripts/export_feedback.py" in source_paths
+                assert "AGENTS.md" in source_paths
+                assert not any(path.startswith(("models/", "runtime/")) or path == "config.json"
+                               for path in source_paths)
+                assert baseline.testzip() is None
             source_modules = {
                 path.name for path in (Path(__file__).resolve().parent.parent / "voice2text").glob("*.py")
             }
@@ -58,7 +74,24 @@ def main() -> int:
             guide = archive.read(prefix + "安装说明.txt").decode("utf-8")
             assert "https://github.com/cenglin123/voice2text/issues" in guide
             assert "【首次使用】" in guide and "【检查更新】" in guide
+            assert "【Agent 排查】" in guide
             assert archive.testzip() is None
+            archive.extractall(root / "installed")
+        install = root / "installed" / prefix
+        target_file = install / "voice2text/target.py"
+        target_file.write_text(target_file.read_text(encoding="utf-8") + "\n# local fix\n", encoding="utf-8")
+        (install / "config.json").write_text('{"private":"keep-out"}', encoding="utf-8")
+        feedback = root / "feedback"
+        subprocess.run(
+            [sys.executable, str(install / "scripts/export_feedback.py"),
+             "--output-dir", str(feedback), "--summary", "目标验证异常"],
+            check=True, capture_output=True, text=True,
+        )
+        diff_text = (feedback / "修复.diff").read_text(encoding="utf-8")
+        report_text = (feedback / "反馈.md").read_text(encoding="utf-8")
+        assert "diff --git a/voice2text/target.py b/voice2text/target.py" in diff_text
+        assert "# local fix" in diff_text and "目标验证异常" in report_text
+        assert "keep-out" not in diff_text + report_text
         spec = shortcut_spec(root, root / "runtime/python/python.exe")
         assert spec["target"].endswith("runtime\\python\\pythonw.exe")
         assert spec["arguments"].endswith('run_gui.pyw"')
@@ -97,6 +130,7 @@ def main() -> int:
         with zipfile.ZipFile(zip_path) as archive:
             names = archive.namelist()
             assert prefix + "offline-bundle.txt" in names
+            assert prefix + "AGENTS.md" in names and prefix + "source-baseline.zip" in names
             assert prefix + "runtime/python/python.exe" in names
             assert prefix + f"models/punctuation/{PUNCT_NAME}/model.int8.onnx" in names
             assert not any("/llm/" in name or "/vendor/" in name for name in names)
