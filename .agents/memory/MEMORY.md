@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-10-22 00:22
+> 最近重建：2026-10-22 00:59
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-10-21 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [候选包流程额外选择安装说明导致上传检查失败](../../docs/problems/bugfix/candidate-artifact-extra-guide.md) — fixed · low · active · 更新于 2026-10-22
 - [悬浮窗比例预览裁掉操作按钮与状态](../../docs/problems/bugfix/widget-preview-cropped-layout.md) — fixed · low · active · 更新于 2026-10-22
 - [高 DPI 屏幕上悬浮窗和设置界面偏小](../../docs/problems/bugfix/desktop-ui-too-small-at-high-dpi.md) — mitigated · medium · active · 更新于 2026-10-22
 - [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-23
