@@ -11,6 +11,12 @@
 - 补治理文档分级复查规则（准则段 ≥3 独立 reviewer）；审计清单对齐当前 init-agent-docs。
 - 见 docs/plans/completed/governance-upgrade.md。
 
+### 更新真机验收与界面优化待办
+
+#### 变更内容
+- 用户确认浅色任务栏、微信、WPS、Windows Terminal 和 Windows 10 虚拟机验收通过；高 DPI 仍有问题，列为下一阶段优先项。
+
+
 ---
 
 ## 2026-09-24
