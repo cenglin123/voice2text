@@ -23,7 +23,7 @@ PACKAGE_FILES = tuple(f"voice2text/{name}.py" for name in (
     "__init__", "activity", "asr", "capture", "clipboard_tx", "config", "desktop",
     "diagnostics", "dpi", "hotkey", "input", "keysender", "layered", "main", "model_download",
     "performance", "proofread", "punctuation", "settings_window", "target", "tray",
-    "tray_menu", "trayicon", "update", "widget",
+    "tray_menu", "trayicon", "update", "widget", "widget_render",
 ))
 SCRIPT_FILES = (
     "scripts/apply_update.ps1", "scripts/create_shortcut.py",

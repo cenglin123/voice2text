@@ -22,6 +22,7 @@ from voice2text.model_download import model_download
 from voice2text import __version__
 from voice2text.dpi import enable_dpi_awareness, window_scale, window_workarea
 from voice2text.update import update_manager
+from voice2text.widget_render import BASE_H, WidgetRenderer
 
 _BG = "#16243D"
 _CARD = "#20314D"
@@ -257,6 +258,7 @@ class RoundedButton(tkinter.Canvas):
         self._fill, self._fg, self._active = bg, fg, active
         self._icon, self._bold, self._anchor = image, bold, anchor
         self._pressed = False
+        self._enabled = True
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Enter>", lambda e: self._draw(True))
         self.bind("<Leave>", lambda e: self._draw(False))
@@ -264,23 +266,26 @@ class RoundedButton(tkinter.Canvas):
         self.bind("<FocusOut>", lambda e: self._draw())
         self.bind("<ButtonPress-1>", lambda e: setattr(self, "_pressed", True))
         self.bind("<ButtonRelease-1>", self._release)
-        self.bind("<Return>", lambda e: self._command())
-        self.bind("<space>", lambda e: self._command())
+        self.bind("<Return>", lambda e: self._command() if self._enabled else None)
+        self.bind("<space>", lambda e: self._command() if self._enabled else None)
         self._draw()
 
-    def set_style(self, *, text=None, bg=None, fg=None) -> None:
+    def set_style(self, *, text=None, bg=None, fg=None, enabled=None) -> None:
         if text is not None:
             self._text = text
         if bg is not None:
             self._fill = bg
         if fg is not None:
             self._fg = fg
+        if enabled is not None:
+            self._enabled = enabled
+            self.configure(cursor="hand2" if enabled else "", takefocus=enabled)
         self._draw()
 
     def _draw(self, hover=False) -> None:
         self.delete("all")
         w, h = max(2, self.winfo_width()), max(2, self.winfo_height())
-        self._surface = _surface(w, h, round(8 * self._dpi), self._active if hover else self._fill,
+        self._surface = _surface(w, h, round(8 * self._dpi), self._active if hover and self._enabled else self._fill,
                                  _ACCENT if self.focus_get() is self else None)
         self.create_image(0, 0, image=self._surface, anchor="nw")
         font_scale = float(getattr(self.winfo_toplevel(), "_v2t_font_scale", 1.0))
@@ -298,7 +303,7 @@ class RoundedButton(tkinter.Canvas):
 
     def _release(self, ev) -> None:
         was_pressed, self._pressed = self._pressed, False
-        if was_pressed and 0 <= ev.x < self.winfo_width() and 0 <= ev.y < self.winfo_height():
+        if self._enabled and was_pressed and 0 <= ev.x < self.winfo_width() and 0 <= ev.y < self.winfo_height():
             self._command()
 
 
@@ -360,7 +365,7 @@ class SettingsWindow:
     def _px(self, value: float) -> int:
         return round(value * self._dpi_scale)
 
-    def __init__(self, cfg_dict: dict, apply_cb, preview_image: Image.Image | None = None,
+    def __init__(self, cfg_dict: dict, apply_cb,
                  on_debug=None, on_update=None, dpi_scale: float | None = None) -> None:
         self._apply_cb = apply_cb
         self._on_debug = on_debug
@@ -371,7 +376,7 @@ class SettingsWindow:
         self._font_scale = float(self._cfg.get("font_scale", 1.0))
         self._font_widgets = []
         self._capturing = False
-        self._preview_source = preview_image
+        self._preview_state = "idle"
         self._preview_scale = float(cfg_dict.get("widget_scale", 1.0))
         self._cards = {}
         self._nav = {}
@@ -528,9 +533,19 @@ class SettingsWindow:
             self._sliders.append(slider)
             var.trace_add("write", lambda *_, v=var, text=pct, unit=suffix: self._appearance_changed(v, text, unit))
         self._font_var.trace_add("write", lambda *_: self._set_font_scale(self._font_var.get() / 100))
+        preview_controls = tkinter.Frame(c2, bg=_CARD)
+        preview_controls.pack(fill="x", pady=(p(18), p(4)))
+        self._preview_buttons = {}
+        for state, title in (("idle", "待命"), ("listening", "聆听"), ("proofreading", "校对")):
+            button = RoundedButton(preview_controls, title,
+                                   lambda value=state: self._set_preview_state(value),
+                                   width=76, height=32, bg=_TRACK)
+            button.pack(side="left", padx=(0, p(8)))
+            self._preview_buttons[state] = button
         self._preview = tkinter.Canvas(c2, height=p(118), bg=_CARD, highlightthickness=0)
         self._preview.pack(fill="x", pady=(p(6), 0))
         self._preview.bind("<Configure>", lambda e: self._draw_preview())
+        self._set_preview_state("idle")
 
         c3 = card("features", "识别与校对", "选择录音设备，管理本地校对模型")
         self._llm_path = load_config().llm_model_path
@@ -680,7 +695,7 @@ class SettingsWindow:
         ready = self._llm_path.is_file()
         self._model_status.set(message or ("校对模型已安装" if ready else "可选：未安装校对模型，语音与标点仍可正常使用"))
         self._download_button.set_style(text="下载中…" if active else "已安装" if ready else "下载校对模型 · 1.1 GB",
-                                        fg=_SUB if active or ready else _TEXT)
+                                        fg=_SUB if active or ready else _TEXT, enabled=not active and not ready)
         self._model_poll = self.root.after(500, self._poll_model_download)
 
     def _update_clicked(self) -> None:
@@ -714,7 +729,8 @@ class SettingsWindow:
             fg = _SUB if snapshot.state in {"checking", "downloading"} else _TEXT
             message = snapshot.message or "可手动检查 GitHub 正式版本"
         self._update_status.set(message)
-        self._update_button.set_style(text=text, fg=fg)
+        self._update_button.set_style(text=text, fg=fg,
+                                      enabled=update_manager.supported and snapshot.state not in {"checking", "downloading"})
         self._update_poll = self.root.after(500, self._poll_update)
 
     def _cancel_polls(self, event) -> None:
@@ -816,6 +832,7 @@ class SettingsWindow:
                     child._draw()
                 redraw_buttons(child)
         redraw_buttons(self.root)
+        self._draw_preview()
 
     def _open_debug(self) -> None:
         if self._on_debug:
@@ -824,34 +841,29 @@ class SettingsWindow:
             self.root.lower()
             self._on_debug()
 
+    def _set_preview_state(self, state: str) -> None:
+        self._preview_state = state
+        for name, button in self._preview_buttons.items():
+            button.set_style(bg=_ACCENT if name == state else _TRACK)
+        self._draw_preview()
+
     def _draw_preview(self) -> None:
         if not hasattr(self, "_preview"):
             return
         canvas = self._preview
         canvas.delete("all")
         w = max(1, canvas.winfo_width())
-        if self._preview_source is not None:
-            # 与实际悬浮窗共用同一帧；先按目标比例居中裁切，避免把内容横向压扁。
-            source = self._preview_source
-            height = max(1, self._px(104 * self._scale_var.get() / 100 * 0.6))
-            aspect = self._aspect_var.get() / 100
-            width = max(1, round(height * aspect))
-            source_aspect = source.width / source.height
-            if aspect < source_aspect:
-                crop_w = max(1, round(source.height * aspect))
-                left = (source.width - crop_w) // 2
-                source = source.crop((left, 0, left + crop_w, source.height))
-            elif aspect > source_aspect:
-                crop_h = max(1, round(source.width / aspect))
-                top = (source.height - crop_h) // 2
-                source = source.crop((0, top, source.width, top + crop_h))
-            image = source.resize((width, height), Image.Resampling.LANCZOS)
-            image.putalpha(image.getchannel("A").point(lambda a: round(a * self._opacity_var.get() / 100)))
-            self._preview_photo = ImageTk.PhotoImage(image)
-            canvas.create_image(w // 2, self._px(50), image=self._preview_photo)
-            caption = "外观预览（缩略）"
-        else:
-            caption = "保存后应用到悬浮窗"
+        if w <= 1:
+            return
+        aspect = self._aspect_var.get() / 100
+        height = max(1, min(self._px(BASE_H * self._scale_var.get() / 100 * 0.6),
+                            round(max(1, w - self._px(24)) / aspect)))
+        width = max(1, round(height * aspect))
+        image = WidgetRenderer(width, height, height / BASE_H, self._preview_state, phase=1.0).render()
+        image.putalpha(image.getchannel("A").point(lambda a: round(a * self._opacity_var.get() / 100)))
+        self._preview_photo = ImageTk.PhotoImage(image)
+        canvas.create_image(w // 2, self._px(50), image=self._preview_photo)
+        caption = "外观预览（缩略）"
         canvas.create_text(w // 2, self._px(107), text=caption, fill=_SUB,
                            font=(_FONT, -self._px(11 * self._font_scale)))
 

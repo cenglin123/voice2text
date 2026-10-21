@@ -99,7 +99,6 @@ def main() -> None:
         square = widget.snapshot()
         assert square.size == (104, 104)
         assert square.getpixel((0, 0))[3] == 0
-        assert len(widget._wave_heights(round(23 * 3))) >= 3
         for name, (x, y, _) in widget._hits.items():
             assert 0 <= x < square.width and 0 <= y < square.height
             assert widget._hit(x, y) == name

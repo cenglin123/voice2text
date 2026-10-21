@@ -662,7 +662,7 @@ def _gui_main(output) -> int:
                         "input_device": cfg.input_device,
                     }
                     ui.settings = SettingsWindow(
-                        cfg_dict, app.apply_settings, ui.widget.snapshot(),
+                        cfg_dict, app.apply_settings,
                         on_debug=lambda: app.cmd_queue.put(("debug", None)),
                         on_update=lambda archive, version: app.cmd_queue.put(
                             ("apply_update", (archive, version))

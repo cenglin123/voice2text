@@ -15,7 +15,7 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw, ImageGrab
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from voice2text.tray_menu import PAD, TOP_H, ROW_H, WIDTH, TrayMenu
+from voice2text.tray_menu import PAD, TOP_H, ROW_H, WIDTH, SS, TrayMenu, _hotkey_text
 from voice2text.tray import build_tray
 from voice2text.trayicon import draw_icon
 
@@ -44,12 +44,13 @@ def main():
     parser.add_argument("--tray-lifecycle", action="store_true")
     parser.add_argument("--physical-click", action="store_true")
     parser.add_argument("--icon-preview", type=Path)
+    parser.add_argument("--font-scale", type=float, default=1.0)
     args = parser.parse_args()
     root = tkinter.Tk()
     root.withdraw()
     calls = []
     app = SimpleNamespace(active=False, widget_visible=True,
-                          hotkey=SimpleNamespace(combo="alt+v"))
+                          hotkey=SimpleNamespace(combo="alt+v"), font_scale=args.font_scale)
     menu = TrayMenu(root, app, calls.append)
     try:
         menu.show(900, 760)
@@ -80,6 +81,12 @@ def main():
         root.update()
         assert menu._hotkey_display.endswith("PgDn")
         assert menu._hotkey_width <= (WIDTH - 172) * 3
+        assert menu._label_bounds[2] + 12 * SS <= menu._hotkey_bounds[0]
+        # 超长或非标准名称也必须适配分配宽度。
+        draw = ImageDraw.Draw(Image.new("RGB", (500, 50)))
+        for combo in ("ctrl+alt+shift+page_down", "ctrl+browser_search", "very_long_modifier+very_long_key_name"):
+            text, font = _hotkey_text(draw, combo, 100 * SS, 1.35)
+            assert draw.textlength(text, font=font) <= 100 * SS
         # 第二次打开验证动态文案和命令映射；一次真实 Win32 点击已覆盖 NOACTIVATE 路由。
         menu._click(SimpleNamespace(y=PAD + TOP_H + ROW_H * 4 + 5))
         assert calls[-1] == "quit"

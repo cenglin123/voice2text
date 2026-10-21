@@ -69,7 +69,16 @@ def _hotkey_text(draw, combo: str, max_width: int, scale: float = 1.0):
             font = _font(round(size * scale) * SS)
             if draw.textlength(candidate, font=font) <= max_width:
                 return candidate, font
-    return candidates[-1], _font(round(10 * scale) * SS)
+    font = _font(round(10 * scale) * SS)
+    original = candidates[1]
+    # 非标准键名或两个超长键也不能突破列宽，省略中间而保留两端。
+    for length in range(len(original) - 1, -1, -1):
+        left = (length + 1) // 2
+        right = length // 2
+        candidate = original[:left] + "…" + (original[-right:] if right else "")
+        if draw.textlength(candidate, font=font) <= max_width:
+            return candidate, font
+    return "", font
 
 
 class TrayMenu:
@@ -200,12 +209,16 @@ class TrayMenu:
         top_y = (PAD + TOP_H // 2) * SS
         self._icon(d, "mic", 41 * SS, top_y, ACCENT)
         label = "停止听写" if self.app.active else "开始听写"
-        d.text((70 * SS, top_y), label, anchor="lm", font=_font(round(16 * self.font_scale) * SS), fill=TEXT)
+        label_font = _font(round(16 * self.font_scale) * SS)
+        label_position = (70 * SS, top_y)
+        self._label_bounds = d.textbbox(label_position, label, anchor="lm", font=label_font)
+        d.text(label_position, label, anchor="lm", font=label_font, fill=TEXT)
         hotkey_right = (WIDTH - 22) * SS
-        hotkey_max = (WIDTH - 172) * SS
+        hotkey_max = hotkey_right - self._label_bounds[2] - 16 * SS
         hotkey, hotkey_font = _hotkey_text(d, self.app.hotkey.combo, hotkey_max, self.font_scale)
         self._hotkey_display = hotkey
         self._hotkey_width = d.textlength(hotkey, font=hotkey_font)
+        self._hotkey_bounds = d.textbbox((hotkey_right, top_y), hotkey, anchor="rm", font=hotkey_font)
         d.text((hotkey_right, top_y), hotkey, anchor="rm", font=hotkey_font, fill=SUB)
 
         start = PAD + TOP_H
@@ -217,8 +230,6 @@ class TrayMenu:
             cy = y0 + ROW_H * SS // 2
             self._icon(d, kind, 41 * SS, cy, SUB)
             d.text((70 * SS, cy), label_fn(), anchor="lm", font=_font(round(14 * self.font_scale) * SS), fill=TEXT)
-            if kind in {"gear", "book", "terminal"}:
-                self._chevron(d, (WIDTH - 27) * SS, cy, SUB)
             if i in (1, 3):
                 line_y = y0 + ROW_H * SS
                 d.line([26 * SS, line_y, (WIDTH - 26) * SS, line_y], fill=(61, 73, 91, 180), width=SS)
@@ -227,11 +238,6 @@ class TrayMenu:
         self._last_image = small
         if self.visible:
             layered.update(self.hwnd, small, self.x, self.y)
-
-    @staticmethod
-    def _chevron(d, x, y, color):
-        s = 5 * SS
-        d.line([x - s, y - s, x, y, x - s, y + s], fill=color, width=2 * SS, joint="curve")
 
     @staticmethod
     def _icon(d, kind, x, y, color):

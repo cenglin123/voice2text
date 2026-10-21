@@ -6,7 +6,7 @@ import tkinter
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PIL import Image, ImageGrab
+from PIL import ImageGrab
 from voice2text.settings_window import (
     SettingsWindow, RoundedButton, RoundedField, _normalize_combo,
 )
@@ -29,12 +29,11 @@ def main():
     cfg = {"hotkey": "alt+v", "widget_scale": 1.0, "widget_aspect": 3.27,
            "widget_opacity": 0.92, "proofread_enabled": True,
            "sound_cue": True, "autostart": False, "font_scale": args.font_scale}
-    preview = Image.new("RGBA", (340, 104), (30, 45, 70, 255))
     with patch("voice2text.settings_window.get_autostart", return_value=False), \
          patch("voice2text.settings_window.set_autostart", return_value=True), \
          patch("pathlib.Path.write_text", return_value=0):
         window = SettingsWindow(cfg, lambda value: applied.append(value) or value,
-                                preview, dpi_scale=args.dpi, on_debug=lambda: None)
+                                dpi_scale=args.dpi, on_debug=lambda: None)
         try:
             window.root.update()
             for page, expected in (("all", {"hotkey", "general"}),
@@ -86,6 +85,22 @@ def main():
             )
             window._select_page("all")
             window.root.update()
+            # 真正禁用的按钮必须同时阻断鼠标和键盘激活。
+            button = window._hotkey_btn
+            with patch.object(button, "_command") as command:
+                event = tkinter.Event()
+                event.x = event.y = 1
+                button.set_style(enabled=False)
+                button._pressed = True
+                button._release(event)
+                button.focus_force()
+                window.root.update()
+                button.event_generate("<Return>")
+                command.assert_not_called()
+                button.set_style(enabled=True)
+                button._pressed = True
+                button._release(event)
+                command.assert_called_once()
             # 字体拖动必须即时生效，不能静默忽略非法样式，也不能反复乘 DPI。
             window._set_font_scale(1.35)
             window._set_font_scale(args.font_scale)
@@ -111,6 +126,16 @@ def main():
             assert window._aspect_var.get() == 100
             preview_side = window._px(104 * 1.25 * 0.6)
             assert window._preview_photo.width() == window._preview_photo.height() == preview_side
+            preview_frames = []
+            for state in ("idle", "listening", "proofreading"):
+                window._set_preview_state(state)
+                preview_frames.append(window._preview_photo.tk.call(str(window._preview_photo), "data", "-format", "png"))
+            assert len(set(preview_frames)) == 3
+            # 最宽、最大预览应完整缩入画布，不能裁去两侧按钮。
+            window.sync_appearance(1.5, 5.0)
+            window.root.update()
+            assert window._preview_photo.width() <= window._preview.winfo_width()
+            window.sync_appearance(1.25, 1.0)
             window._save()
             assert applied[0]["widget_scale"] == 1.25
             assert applied[0]["widget_aspect"] == 1.0
