@@ -9,7 +9,7 @@ from ctypes import wintypes
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from voice2text import layered
-from voice2text.dpi import system_scale
+from voice2text.dpi import system_scale, window_scale
 
 SS = 3
 WIDTH = 308
@@ -116,6 +116,13 @@ class TrayMenu:
         self._render()
 
     def show(self, x: int, y: int) -> None:
+        # 复用窗口必须先移到弹出屏幕，再查询该窗口 DPI。
+        self.root.geometry(f"1x1+{x}+{y}")
+        self.root.update_idletasks()
+        self._dpi_scale = window_scale(self.root)
+        self.width = round(WIDTH * self._dpi_scale)
+        self.height = round(self._logical_height * self._dpi_scale)
+        self.canvas.configure(width=self.width, height=self.height)
         info = _MonitorInfo(size=ctypes.sizeof(_MonitorInfo))
         monitor = _user.MonitorFromPoint(wintypes.POINT(x, y), 2)  # MONITOR_DEFAULTTONEAREST
         if monitor and _user.GetMonitorInfoW(monitor, ctypes.byref(info)):

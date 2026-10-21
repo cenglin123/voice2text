@@ -39,7 +39,7 @@ def main() -> None:
             for state in ("idle", "loading", "listening", "proofreading", "error"):
                 widget.set_state(state)
                 frame = widget.snapshot()
-                assert frame.size == (round(340 * scale), round(104 * scale))
+                assert frame.size == (round(340 * scale * widget._dpi_scale), round(104 * scale * widget._dpi_scale))
                 assert frame.getpixel((0, 0))[3] == 0
                 for name, (x, y, _) in widget._hits.items():
                     assert 0 <= x < frame.width and 0 <= y < frame.height
@@ -191,7 +191,7 @@ def main() -> None:
             widget.root.destroy()
     print("PASS unsupported blur -> ordinary layered surface")
 
-    with patch("voice2text.widget.system_scale", return_value=1.5):
+    with patch("voice2text.widget.window_scale", return_value=1.5):
         resized = []
         widget = DictationWidget(on_resize=lambda scale, aspect: resized.append((scale, aspect)))
         try:

@@ -17,7 +17,7 @@ import tkinter
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageFilter, ImageChops
 
 from voice2text import layered
-from voice2text.dpi import enable_system_dpi_awareness, system_scale
+from voice2text.dpi import enable_dpi_awareness, window_scale
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 BASE_W, BASE_H = 340, 104
@@ -82,9 +82,9 @@ class DictationWidget:
         on_quit=None,
         on_resize=None,
     ) -> None:
-        enable_system_dpi_awareness()
-        self._dpi_scale = system_scale()
-        self._scale = scale * self._dpi_scale
+        enable_dpi_awareness()
+        self._dpi_scale = 1.0
+        self._scale = scale
         self._aspect = max(MIN_ASPECT, min(MAX_ASPECT, aspect))
         self._opacity = opacity
         self._on_toggle = on_toggle
@@ -100,6 +100,10 @@ class DictationWidget:
         self.root.title("voice2text")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
+        self.root.geometry("+60+60")
+        self.root.update_idletasks()
+        self._dpi_scale = window_scale(self.root)
+        self._scale = scale * self._dpi_scale
         self._h = round(BASE_H * self._scale)
         self._w = round(self._h * self._aspect)
         self.root.geometry(f"{self._w}x{self._h}+60+60")
@@ -297,8 +301,18 @@ class DictationWidget:
             self._use_fallback()
 
     def _on_configure(self, ev) -> None:
-        if ev.widget is self.root and self._glass:
-            self._sync_backdrop()
+        if ev.widget is self.root:
+            if not getattr(self, "_resizing", False):
+                self._refresh_dpi()
+            if self._glass:
+                self._sync_backdrop()
+
+    def _refresh_dpi(self) -> None:
+        scale = window_scale(self.root)
+        if abs(scale - self._dpi_scale) > 0.01:
+            preference = self._scale / self._dpi_scale
+            self._dpi_scale = scale
+            self.apply_appearance(preference, self._opacity)
 
     def _sync_backdrop(self) -> None:
         if not self._glass or self._backdrop is None:
@@ -439,6 +453,7 @@ class DictationWidget:
                 self._on_toggle()
         self._drag_off = None
         self._resizing = False
+        self._refresh_dpi()
 
     # ---- 状态与队列（工作线程 → 主线程）----
 

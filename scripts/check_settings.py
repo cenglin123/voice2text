@@ -10,12 +10,15 @@ from PIL import Image, ImageGrab
 from voice2text.settings_window import (
     SettingsWindow, RoundedButton, RoundedField, _normalize_combo,
 )
+from voice2text.dpi import window_workarea
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path)
     parser.add_argument("--dpi", type=float, default=None, help="模拟系统 DPI 倍率，例如 1.5 或 2")
+    parser.add_argument("--page", choices=("all", "features", "appearance", "about"), default="all")
+    parser.add_argument("--font-scale", type=float, default=1.0)
     args = parser.parse_args()
     assert _normalize_combo("Pause", set()) == "pause"
     assert _normalize_combo("F8", set()) == "f8"
@@ -25,14 +28,22 @@ def main():
     applied = []
     cfg = {"hotkey": "alt+v", "widget_scale": 1.0, "widget_aspect": 3.27,
            "widget_opacity": 0.92, "proofread_enabled": True,
-           "sound_cue": True, "autostart": False}
+           "sound_cue": True, "autostart": False, "font_scale": args.font_scale}
     preview = Image.new("RGBA", (340, 104), (30, 45, 70, 255))
     with patch("voice2text.settings_window.get_autostart", return_value=False), \
          patch("voice2text.settings_window.set_autostart", return_value=True), \
          patch("pathlib.Path.write_text", return_value=0):
         window = SettingsWindow(cfg, lambda value: applied.append(value) or value,
-                                preview, dpi_scale=args.dpi)
+                                preview, dpi_scale=args.dpi, on_debug=lambda: None)
         try:
+            window.root.update()
+            for page, expected in (("all", {"hotkey", "general"}),
+                                   ("features", {"features"}), ("appearance", {"appearance"}),
+                                   ("about", {"about"})):
+                window._select_page(page)
+                window.root.update()
+                assert {name for name, panel in window._cards.items() if panel.winfo_ismapped()} == expected
+            window._select_page(args.page)
             window.root.update()
             if args.capture:
                 args.capture.parent.mkdir(parents=True, exist_ok=True)
@@ -61,13 +72,27 @@ def main():
             assert all(mask.itemcget(1, "outline") == "#344865"
                        for mask in window._corner_masks)
             assert window._hotkey_entry.coords(window._hotkey_entry._window)[0] == window._px(13)
-            assert window.root.winfo_width() == min(
-                window._px(920), window.root.winfo_screenwidth() - window._px(64)
-            )
+            left, top, right, bottom = window_workarea(window.root)
+            assert window.root.winfo_width() == min(window._px(920), right - left - window._px(32))
+            assert window.root.winfo_y() >= top
+            assert window.root.winfo_y() + window.root.winfo_height() <= bottom
+            if args.dpi:
+                assert window._dpi_scale == args.dpi  # 小屏不再偷偷缩小整套界面。
+            for widget, _family, base, *_styles in window._font_widgets:
+                actual = int(widget.tk.splitlist(widget.cget("font"))[1])
+                assert actual == -max(window._px(8), window._px(base * args.font_scale)), (widget, actual, base)
             assert window._save_btn.winfo_rootx() + window._save_btn.winfo_width() <= (
                 window.root.winfo_rootx() + window.root.winfo_width()
             )
+            window._select_page("all")
+            window.root.update()
+            # 字体拖动必须即时生效，不能静默忽略非法样式，也不能反复乘 DPI。
+            window._set_font_scale(1.35)
+            window._set_font_scale(args.font_scale)
+            assert int(window._heading.tk.splitlist(window._heading.cget("font"))[1]) == -window._px(24 * args.font_scale)
             window._start_capture()
+            window.root.focus_force()
+            window.root.update()
             window.root.event_generate("<KeyPress-Pause>", when="now")
             assert window._cfg["hotkey"] == "pause"
             assert not window._capturing
@@ -80,6 +105,7 @@ def main():
             left_knob = window._sliders[1].bbox("knob")
             assert left_knob is not None and left_knob[0] >= 1, left_knob
             window.sync_appearance(1.25, 1.0)
+            window._select_page("appearance")
             window.root.update()
             assert window._scale_var.get() == 125
             assert window._aspect_var.get() == 100
@@ -91,6 +117,16 @@ def main():
         finally:
             if window.root.winfo_exists():
                 window.root.destroy()
+    # Tk 的 -100 是距屏幕右边缘 100px，+-100 才是负的绝对坐标。
+    with patch("voice2text.settings_window.window_workarea", return_value=(-1920, 0, 0, 1040)), \
+         patch("voice2text.settings_window.get_autostart", return_value=False):
+        window = SettingsWindow(cfg, lambda value: value, dpi_scale=1.0)
+        try:
+            window.root.update()
+            assert -1920 <= window.root.winfo_x() < 0
+            assert window.root.winfo_x() + window.root.winfo_width() <= 0
+        finally:
+            window.root.destroy()
     print("PASS rounded controls, hotkey padding, aspect/scale sync and save")
 
 

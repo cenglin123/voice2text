@@ -24,6 +24,10 @@ from time import perf_counter_ns
 
 import winsound
 
+from voice2text.dpi import enable_dpi_awareness
+
+enable_dpi_awareness()  # 必须先于 UIAutomation 的导入和任何窗口创建。
+
 from voice2text import __version__
 from voice2text.asr import ASRSessionWorker, StreamingASR
 from voice2text.capture import WATCHDOG_SECONDS, CaptureError, MicrophoneCapture
