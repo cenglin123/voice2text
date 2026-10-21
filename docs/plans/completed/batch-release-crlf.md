@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 mode: phased
 created_at: 2026-10-22
 ---
@@ -13,7 +13,7 @@ created_at: 2026-10-22
 | 根因复现 | completed | 同一安装脚本 LF 在 cmd.exe 截断命令，CRLF 正确进入离线分支 |
 | 独立复核 | completed | 检查换行规范化、源码基线一致、真实 CMD 验证安全性 |
 | 构建修复与回归 | completed | LF/CRLF/混合换行输入统一输出 CRLF；安装与启动入口真实 CMD 验证 |
-| 小补丁与完整发行 | pending | v0.1.5 小补丁可覆盖四个 BAT；v0.1.6 候选下载回 Windows 验证后正式发布 |
+| 小补丁与完整发行 | completed | v0.1.5 小补丁可覆盖四个 BAT；v0.1.6 候选下载回 Windows 验证后正式发布 |
 
 只改分发构建及其业务回归，不改治理准则文件，不提交用户配置。
 构建时在写源码基线前规范所有 BAT 的换行；验证原始字节而非归一化后比较。
@@ -30,3 +30,10 @@ created_at: 2026-10-22
 - `batch_review` 最终独立复核并实际执行 `check_release.py` 通过；三种换行、交付/基线
   字节一致、四入口真实 CMD 替身回归均符合计划。门禁仅作用于项目四入口，不改变运行时自带 BAT。
 - `python scripts/check_all.py --quiet` 与 `maintain.py --check` 通过。
+
+- GitHub Actions `39641914772` 从标签提交 `347748d` 成功组装候选，下载回 Windows 独立目录后
+  完整验证 SHA-256、CRC、标签源码、四 BAT 原始 CRLF、基线与配置；禁用 Python 网络连接时
+  依赖与模型加载通过；实际中文 CMD 安装入口与本地快捷方式创建通过；悬浮窗/设置/托盘通过。
+- 正式 v0.1.6 已发布为 Latest；ZIP 471,878,237 字节，SHA-256
+  `7cd86b3825b3eedee50ce987a4822454ca2f51f109a2ec0a29f249176add21c2`。
+  v0.1.5 小补丁仅 3,740 字节，上传原发行页，无需重新下载整包。

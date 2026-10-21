@@ -4,11 +4,12 @@
 
 ## 当前任务
 
-源码已修复分发批处理并准备 `0.1.6`；GitHub 正式版暂为 `0.1.5`，其安装入口存在 LF 换行回归。
+源码与 GitHub 最新正式发行版均为 `0.1.6`，标签指向 `347748d`。
 
-- v0.1.5 的四个 BAT 已制作独立 CRLF 补丁；构建器统一换行后再写源码基线。
-  修复、验证与发布进展见 `docs/plans/active/batch-release-crlf.md`。
-
+- 分发构建在写源码基线前将四个 BAT 入口统一为无 BOM CRLF；已补充三种源换行、
+  原始字节/基线一致性与真实 CMD 安装/调试入口回归，避免 Linux 构建脚本被 Windows 截断。
+- v0.1.5 发行页另提供四文件小补丁，可覆盖原目录后安装，不替换配置或模型。
+  完整验收记录见 `docs/plans/completed/batch-release-crlf.md`。
 - 根据其它设备反馈，WebView 目标验证可通过 UIA 基类访问 ValuePattern；微信/ChatGPT WebView
   按进程名使用原生焦点锁定，未知应用保留严格可编辑校验。设置页支持录音设备选择，
   已选设备失效时明确报错。
@@ -37,10 +38,12 @@
 - 治理升级后 `check_all.py --quiet`、`audit.py check`、`maintain.py --check` 均通过；
   治理文档改动已按硬约束分级，由 3 名独立 reviewer 复查（结论见
   `docs/plans/completed/governance-upgrade.md`）。
-- 本地 `dist/voice2text-v0.1.5-windows-x64.zip` 为 471,878,171 字节，SHA-256：
-  `7aa120e25205f4df4e14d9f95660d8b4f69ca7513ed25d8bbefbb950cc6f9479`。
-  压缩包 CRC、核心新增文件、默认配置和源码基线隐私范围已核对；GitHub Release 的
-  ZIP 大小与摘要和本地一致，校验文件也已上传。
+- 本地 `dist/voice2text-v0.1.6-windows-x64.zip` 为 471,878,237 字节，SHA-256：
+  `7cd86b3825b3eedee50ce987a4822454ca2f51f109a2ec0a29f249176add21c2`。
+  GitHub Latest 的资产摘要/大小与本地一致。Actions `39641914772` 从 `347748d` 组装候选包，
+  下载回 Windows 独立目录后核对 CRC、源码、四 BAT 原始 CRLF、基线与默认配置，完成
+  禁用 Python 网络连接的模型加载、实际中文 CMD 安装、快捷方式与 GUI 检查。
+  独立 reviewer 执行 `check_release.py` 通过；`check_all.py --quiet` 通过。
 - 用户此前确认 v0.1.4 的浅色任务栏、微信、WPS、Windows Terminal 和 Windows 10 虚拟机真机验收通过。
   高 DPI 真机仍有问题，模拟缩放回归不能视为该问题已解决；麦克风切换和不同权限组合
   未在本次反馈中单独确认。
@@ -48,9 +51,7 @@
   已截图检查常规、识别与校对、关于页。DPI API、悬浮窗、托盘及独立进程 PMv1 检查通过。
   独立复核见 `docs/plans/completed/desktop-ui-refinement.md`。
 - v0.1.5 完成 150 种渲染布局、三状态预览、长快捷键和真实禁用态回归与独立复核。
-  最终包由 Actions `39637990103` 从已校验基线组装，下载回 Windows 新目录后完成
-  源码标签比对（文本换行归一化）、依赖导入、禁用 Python 网络连接时的模型加载与 GUI 检查。
-  发行闭环见 `docs/plans/completed/desktop-ui-v015.md`。
+  界面验收见 `docs/plans/completed/desktop-ui-v015.md`；安装入口现由 v0.1.6 单独回归覆盖。
 - 连续讲话的模拟切段、上下文投影和校对边界回归通过；本地标点/Qwen 模型样例通过。
   真正长时间语音的语意质量仍须在用户设备验证。Qwen 仍按约 60 字合并短段；单段过长时
   保持完整，1.7B 模型可能照抄或错改，此时安全门禁保留原文。
@@ -58,7 +59,7 @@
 ## 下一步
 
 1. 在高 DPI 笔记本上复验最新源码，尤其正文与控件比例、悬浮窗跨屏和托盘换屏弹出。
-2. 补充 v0.1.5 的麦克风切换、不同权限组合、首次启动准备态和 Windows 10 虚拟机复验反馈。
+2. 补充 v0.1.6 的麦克风切换、不同权限组合、首次启动准备态和 Windows 10 虚拟机复验反馈。
 
 ## 已知取舍
 
