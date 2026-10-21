@@ -1,0 +1,126 @@
+name: Package Windows offline draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Existing source tag
+        required: true
+        type: string
+      baseline_tag:
+        description: Published offline runtime baseline (requirements must match)
+        required: true
+        default: v0.1.4
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-windows-${{ inputs.source_tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      BASELINE_TAG: ${{ inputs.baseline_tag }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Validate tags and clone source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$BASELINE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git clone --depth 1 --branch "$SOURCE_TAG" "https://github.com/$REPO.git" source
+      - name: Download published runtime and models
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$BASELINE_TAG" --repo "$REPO" --json isDraft --jq '.isDraft' | grep -x false
+          gh release download "$BASELINE_TAG" --repo "$REPO" --dir baseline \
+            --pattern "voice2text-$BASELINE_TAG-windows-x64.zip" \
+            --pattern "voice2text-$BASELINE_TAG-windows-x64.zip.sha256"
+          cd baseline
+          sha256sum --check "voice2text-$BASELINE_TAG-windows-x64.zip.sha256"
+      - name: Assemble source with verified baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          python3 - <<'PY'
+          import os, pathlib, subprocess, sys, tempfile, zipfile
+          sys.path.insert(0, 'scripts')
+          import build_release as b
+          assert 'v' + b._version() == os.environ['SOURCE_TAG']
+          source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          name = 'voice2text-' + os.environ['BASELINE_TAG'] + '-windows-x64'
+          archive = pathlib.Path('../baseline') / (name + '.zip')
+          with tempfile.TemporaryDirectory() as tmp:
+              with zipfile.ZipFile(archive) as z:
+                  assert z.testzip() is None
+                  assert all(n.startswith(name + '/') and '..' not in pathlib.PurePosixPath(n).parts for n in z.namelist())
+                  z.extractall(tmp)
+              base = pathlib.Path(tmp) / name
+              assert pathlib.Path('requirements.txt').read_text(encoding='utf-8') == (base / 'requirements.txt').read_text(encoding='utf-8'), 'Runtime requirements changed: prepare a new baseline first'
+              output, checksum = b.build_release(pathlib.Path('../out'), pathlib.Path('unused.whl'), base / 'runtime/python', base / 'models')
+              print(output, checksum)
+          pathlib.Path('../out/source.commit').write_text(source_sha + '\n', encoding='ascii')
+          PY
+      - name: Store candidate files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-candidate-${{ github.run_id }}
+          path: out/*
+          compression-level: 0
+          retention-days: 1
+
+  upload:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Retrieve files without executing source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-candidate-${{ github.run_id }}
+          path: out
+      - name: Check candidate contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re
+          root = pathlib.Path('out')
+          name = 'voice2text-' + os.environ['SOURCE_TAG'] + '-windows-x64.zip'
+          assert sorted(p.name for p in root.iterdir()) == sorted([name, name + '.sha256', 'source.commit'])
+          assert all(p.is_file() and not p.is_symlink() for p in root.iterdir())
+          digest = hashlib.sha256((root / name).read_bytes()).hexdigest()
+          assert (root / (name + '.sha256')).read_text().split() == [digest, name]
+          assert re.fullmatch('[0-9a-f]{40}', (root / 'source.commit').read_text().strip())
+          PY
+      - name: Create isolated draft candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SOURCE_SHA=$(cat out/source.commit)
+          CURRENT_SHA=$(gh api "repos/$REPO/commits/$SOURCE_TAG" --jq '.sha')
+          [[ "$SOURCE_SHA" == "$CURRENT_SHA" ]]
+          CANDIDATE_TAG="$SOURCE_TAG-candidate-$GITHUB_RUN_ID"
+          gh release create "$CANDIDATE_TAG" out/*.zip out/*.sha256 --repo "$REPO" \
+            --draft --target "$SOURCE_SHA" --title "$SOURCE_TAG candidate" \
+            --notes "Candidate only: requires local bundle validation before publishing."
+          echo "Draft candidate: $CANDIDATE_TAG" >> "$GITHUB_STEP_SUMMARY"

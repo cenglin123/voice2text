@@ -35,3 +35,8 @@ created_at: 2026-10-22
 - 作者顺序执行 GUI 验证，截图目视检查横向/方形五状态、设置页外观与托盘大字体。
   `check_settings.py --dpi 2 --font-scale 1.35`、`check_widget.py`、`check_tray_menu.py --font-scale 1.35`、
   `check_dpi.py`、`check_update.py`、`check_all.py --quiet` 均通过。
+- 本地大文件上行明显受限，已停止自建上传进程并清理其未完成资产；改用 GitHub Actions
+  从公开基线包复用运行时/模型，在核对 requirements 后组装同一源码标签的候选包。
+  候选包须下载回本机重新校验和加载模型，才可发布。
+- CI 独立复核要求分离权限并避免覆盖正式资产：构建 job 仅只读，上传 job 独立 runner，
+  不执行源码；官方 artifact actions 固定 SHA，上传只创建唯一候选草稿，不覆盖现有发行版。
