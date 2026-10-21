@@ -85,7 +85,12 @@ def _copy_runtime_files(stage: Path) -> None:
         source = ROOT / rel
         target = stage / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        if target.suffix.lower() == ".bat":
+            # cmd.exe 的批处理读取/跳转要求 CRLF；不能依赖构建宿主或 Git 检出换行。
+            text = source.read_text(encoding="utf-8-sig")
+            target.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+        else:
+            shutil.copy2(source, target)
     shutil.copy2(AGENT_GUIDE_SOURCE, stage / "AGENTS.md")
     (stage / "config.json").write_text(
         json.dumps(_default_config(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
@@ -120,6 +125,12 @@ def _validate_stage(stage: Path, offline: bool = False) -> None:
     if not paths:
         raise SystemExit("发行目录为空")
     for path in paths:
+        if path.relative_to(stage).as_posix() in TEXT_FILES and path.suffix.lower() == ".bat":
+            data = path.read_bytes()
+            if (data.startswith(b"\xef\xbb\xbf") or not data.endswith(b"\r\n")
+                    or b"\n" in data.replace(b"\r\n", b"")
+                    or b"\r" in data.replace(b"\r\n", b"")):
+                raise SystemExit(f"发行批处理必须为无 BOM 的 CRLF：{path.relative_to(stage)}")
         lowered = {part.lower() for part in path.relative_to(stage).parts}
         if lowered.intersection(FORBIDDEN_PARTS):
             raise SystemExit(f"发行包混入禁止目录：{path.relative_to(stage)}")

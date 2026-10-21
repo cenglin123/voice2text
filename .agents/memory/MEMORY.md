@@ -8,12 +8,13 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-10-22 00:59
+> 最近重建：2026-10-22 01:10
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-10-21 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [Linux 构建的分发批处理被 CMD 截断解析](../../docs/problems/bugfix/release-batch-lf-cmd-parsing.md) — fixed · high · active · 更新于 2026-10-22
 - [候选包流程额外选择安装说明导致上传检查失败](../../docs/problems/bugfix/candidate-artifact-extra-guide.md) — fixed · low · active · 更新于 2026-10-22
 - [悬浮窗比例预览裁掉操作按钮与状态](../../docs/problems/bugfix/widget-preview-cropped-layout.md) — fixed · low · active · 更新于 2026-10-22
 - [高 DPI 屏幕上悬浮窗和设置界面偏小](../../docs/problems/bugfix/desktop-ui-too-small-at-high-dpi.md) — mitigated · medium · active · 更新于 2026-10-22

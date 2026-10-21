@@ -12,10 +12,122 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from unittest import mock
 
-from build_release import build_release, _default_config, _version
+import build_release as builder
+from build_release import _default_config, _version
 from create_shortcut import create_shortcut, shortcut_spec
 from download_models import ASR_NAME, ASR_REQUIRED, PUNCT_NAME
+
+BAT_FILES = ("install.bat", "安装程序.bat", "run.bat", "启动程序.bat")
+
+
+def _assert_crlf(data: bytes, label: str) -> None:
+    assert not data.startswith(b"\xef\xbb\xbf"), f"{label}: unexpected BOM"
+    assert data.endswith(b"\r\n"), f"{label}: missing final CRLF"
+    assert b"\n" not in data.replace(b"\r\n", b""), f"{label}: bare LF"
+    assert b"\r" not in data.replace(b"\r\n", b""), f"{label}: bare CR"
+
+
+def _check_bat_normalization(root: Path) -> None:
+    for mode in ("lf", "crlf", "mixed"):
+        source_root = root / f"{mode}-source"
+        stage = root / f"{mode}-stage"
+        source_root.mkdir()
+        for rel in builder.TEXT_FILES + builder.ASSET_FILES + builder.SCRIPT_FILES + builder.PACKAGE_FILES:
+            source = builder.ROOT / rel
+            target = source_root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        shutil.copy2(builder.AGENT_GUIDE_SOURCE, source_root / "scripts/release_agent_guide.md")
+        for rel in BAT_FILES:
+            source = source_root / rel
+            lines = source.read_text(encoding="utf-8-sig").splitlines()
+            if mode == "lf":
+                newline = "\n"
+                content = newline.join(lines) + newline
+            elif mode == "crlf":
+                newline = "\r\n"
+                content = newline.join(lines) + newline
+            else:
+                content = "".join(line + ("\n" if i % 2 == 0 else "\r\n")
+                                   for i, line in enumerate(lines))
+            source.write_bytes(content.encode("utf-8"))
+        stage.mkdir()
+        with mock.patch.object(builder, "ROOT", source_root):
+            builder._copy_runtime_files(stage)
+            builder._write_source_baseline(stage)
+        with zipfile.ZipFile(stage / "source-baseline.zip") as baseline:
+            for rel in BAT_FILES:
+                copied = (stage / rel).read_bytes()
+                _assert_crlf(copied, f"{mode} {rel}")
+                assert baseline.read(rel) == copied, f"{mode} baseline differs for {rel}"
+
+
+def _check_cmd_wrappers(root: Path, archive: zipfile.ZipFile, prefix: str) -> None:
+    fixture = root / "cmd wrapper fixture"
+    fixture.mkdir()
+    for rel in BAT_FILES + ("offline-bundle.txt", "voice2text/main.py"):
+        target = fixture / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(archive.read(prefix + rel))
+    for rel in BAT_FILES:
+        _assert_crlf((fixture / rel).read_bytes(), rel)
+
+    log = fixture / "calls.log"
+    (fixture / "scripts").mkdir()
+    (fixture / "scripts/verify_install.py").write_text(
+        "import pathlib, sys\n"
+        f"p = pathlib.Path({str(log)!r})\n"
+        "p.open('a', encoding='utf-8').write('verify:' + '|'.join(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1:]: raise SystemExit(91)\n", encoding="utf-8")
+    (fixture / "scripts/create_shortcut.py").write_text(
+        "import pathlib, sys\n"
+        f"p = pathlib.Path({str(log)!r})\n"
+        "p.open('a', encoding='utf-8').write('shortcut:' + '|'.join(sys.argv[1:]) + '\\n')\n"
+        "if len(sys.argv) != 2: raise SystemExit(92)\n", encoding="utf-8")
+    (fixture / "voice2text/main.py").write_text(
+        "import pathlib, sys\n"
+        f"p = pathlib.Path({str(log)!r})\n"
+        "p.open('a', encoding='utf-8').write('main:' + '|'.join(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1:]: raise SystemExit(93)\n", encoding="utf-8")
+
+    runtime = fixture / "runtime/python"
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    venv_config = Path(sys.executable).parent.parent / "pyvenv.cfg"
+    assert venv_config.is_file(), f"venv config missing: {venv_config}"
+    shutil.copy2(venv_config, runtime.parent / "pyvenv.cfg")
+    comspec = __import__("os").environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    try:
+        mklink = f'"{comspec}" /d /c mklink /J "{runtime}" "{Path(sys.executable).parent}"'
+        subprocess.run(mklink, check=True, capture_output=True, text=True, timeout=10,
+                       stdin=subprocess.DEVNULL)
+        assert (runtime / "python.exe").is_file(), "junction runtime missing python.exe"
+        assert (fixture / "offline-bundle.txt").is_file()
+        env = dict(__import__("os").environ)
+        env.pop("PYTHONPATH", None)
+        for entry in ("安装程序.bat", "install.bat"):
+            command = f'"{comspec}" /d /c call "{fixture / entry}"'
+            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True,
+                                    timeout=10, stdin=subprocess.DEVNULL, env=env)
+            assert result.returncode == 0, (command, result.returncode, result.stdout, result.stderr)
+        for entry in ("启动程序.bat", "run.bat"):
+            command = f'"{comspec}" /d /c call "{fixture / entry}" --debug'
+            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True,
+                                    timeout=10, stdin=subprocess.DEVNULL, env=env)
+            assert result.returncode == 0, (command, result.returncode, result.stdout, result.stderr)
+        calls = log.read_text(encoding="utf-8").splitlines()
+        assert len([line for line in calls if line.startswith(("verify:", "shortcut:"))]) == 4, calls
+        assert sum(line.startswith("verify:") for line in calls) == 2, calls
+        assert sum(line.startswith("shortcut:") for line in calls) == 2, calls
+        assert sum(line.startswith("main:") for line in calls) == 2, calls
+        assert calls.count("verify:") == 2 and calls.count("main:") == 2, calls
+        assert calls.count(r"shortcut:runtime\python\python.exe") == 2, calls
+        assert all(line in {"verify:", r"shortcut:runtime\python\python.exe", "main:"}
+                   for line in calls), calls
+    finally:
+        if runtime.exists():
+            __import__("os").rmdir(runtime)
 
 
 def main() -> int:
@@ -24,13 +136,14 @@ def main() -> int:
         wheel = root / "llama_cpp_python-0.3.35-py3-none-win_amd64.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
             archive.writestr("llama_cpp_python-0.3.35.dist-info/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-win_amd64\n")
-        zip_path, sha_path = build_release(root / "out", wheel)
+        zip_path, sha_path = builder.build_release(root / "out", wheel)
         assert zip_path.is_file() and sha_path.is_file()
         assert (root / "out/安装说明.txt").is_file()
         original = zip_path.read_bytes()
         assert sha_path.read_text().split()[0] == hashlib.sha256(original).hexdigest()
-        build_release(root / "out", wheel)
+        builder.build_release(root / "out", wheel)
         assert zip_path.read_bytes() == original
+        _check_bat_normalization(root)
         with zipfile.ZipFile(zip_path) as archive:
             names = archive.namelist()
             prefix = f"voice2text-v{_version()}-windows-x64/"
@@ -57,6 +170,12 @@ def main() -> int:
                 assert not any(path.startswith(("models/", "runtime/")) or path == "config.json"
                                for path in source_paths)
                 assert baseline.testzip() is None
+                for rel in BAT_FILES:
+                    packaged = archive.read(prefix + rel)
+                    baseline_bat = baseline.read(rel)
+                    _assert_crlf(packaged, f"built ZIP {rel}")
+                    _assert_crlf(baseline_bat, f"built baseline {rel}")
+                    assert packaged == baseline_bat, f"built ZIP/baseline differ for {rel}"
             source_modules = {
                 path.name for path in (Path(__file__).resolve().parent.parent / "voice2text").glob("*.py")
             }
@@ -125,13 +244,21 @@ def main() -> int:
         private = models / "llm/private.gguf"
         private.parent.mkdir()
         private.write_bytes(b"must not ship")
-        zip_path, _ = build_release(root / "offline", wheel, runtime, models)
+        zip_path, _ = builder.build_release(root / "offline", wheel, runtime, models)
         assert "离线自包含版" in (root / "offline/安装说明.txt").read_text(encoding="utf-8")
         with zipfile.ZipFile(zip_path) as archive:
             names = archive.namelist()
             assert prefix + "offline-bundle.txt" in names
             assert prefix + "AGENTS.md" in names and prefix + "source-baseline.zip" in names
             assert prefix + "runtime/python/python.exe" in names
+            with zipfile.ZipFile(io.BytesIO(archive.read(prefix + "source-baseline.zip"))) as baseline:
+                for rel in BAT_FILES:
+                    packaged = archive.read(prefix + rel)
+                    baseline_bat = baseline.read(rel)
+                    _assert_crlf(packaged, f"offline ZIP {rel}")
+                    _assert_crlf(baseline_bat, f"offline baseline {rel}")
+                    assert packaged == baseline_bat, f"offline ZIP/baseline differ for {rel}"
+            _check_cmd_wrappers(root, archive, prefix)
             assert prefix + f"models/punctuation/{PUNCT_NAME}/model.int8.onnx" in names
             assert not any("/llm/" in name or "/vendor/" in name for name in names)
             assert json.loads(archive.read(prefix + "config.json"))["proofread_enabled"] is False

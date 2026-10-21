@@ -39,20 +39,20 @@ python -m venv .venv
 执行 `-I -X utf8 -m pip install --only-binary=:all: --find-links vendor -r requirements.txt`。
 `vendor` 需预先准备固定版本 llama wheel；构建运行时不得使用开发 `.venv` 或系统 Python 的目录副本。
 运行 `python scripts/build_release.py`，从干净运行时与 `models/` 中仅复制基础模型白名单，
-生成 `dist/voice2text-v0.1.5-windows-x64.zip` 和同名 `.sha256`。
+生成 `dist/voice2text-v0.1.6-windows-x64.zip` 和同名 `.sha256`。
 构建会生成默认配置（校对关闭），不携带个人配置、GGUF 或开发环境。产物和模型不入 Git。
+所有 BAT 在生成源码基线前统一为无 BOM CRLF，确保 Linux 构建产物也能由 Windows CMD 正确解析。
 
 上行受限时，可手动触发 `.github/workflows/package-windows.yml`，指定现有源码标签与已发布
 离线基线标签。流程校验基线摘要并要求 requirements 完全一致，仅复用其运行时和基础模型。
 构建与上传权限隔离，产物进入独立候选草稿；必须下载到 Windows 完成包内验证后再转为正式版。
 依赖变化时需先准备新的运行时基线，不能复用旧包。
 
-当前正式发行版为 `v0.1.5`，收录窗口 DPI、实际字号、设置页分类、悬浮窗比例布局、
-三状态预览和托盘长快捷键等改进。发行 ZIP 为 471,878,171 字节，
-SHA-256 为 `7aa120e25205f4df4e14d9f95660d8b4f69ca7513ed25d8bbefbb950cc6f9479`。
-本地最终包与 GitHub 资产摘要一致；Release 标签指向提交 `73c7f86`。
+v0.1.6 正在验证批处理换行修复。v0.1.5 已发布四文件修复补丁，可覆盖原目录后安装，
+不替换配置、模型或运行时。正式发行资产与摘要查 [CURRENT.md](CURRENT.md)。
 
-构建结构检查：`python scripts/check_release.py`。一键更新回归：`python scripts/check_update.py`。
+构建结构与 Windows CMD 临时入口回归：`python scripts/check_release.py`。
+完整包须实际运行中文安装入口，确认依赖、模型和快捷方式成功；只做导入或归一化后的源码比较不足以验收。一键更新回归：`python scripts/check_update.py`。
 模型下载回归：
 `python scripts/check_download_models.py` 与 `python scripts/check_model_download.py`。
 最终包还必须在虚拟机独立目录验证，构建检查不能替代实际模型加载与 GUI 验收。
