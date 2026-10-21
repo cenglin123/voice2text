@@ -1,7 +1,7 @@
 ---
 liveness: active
-last_confirmed: "2026-09-15"
-confirmed_count: 1
+last_confirmed: "2026-10-21"
+confirmed_count: 2
 ---
 
 # 用户画像
@@ -16,6 +16,7 @@ confirmed_count: 1
 
 - 中文交流
 - 决策风格：先调研后动手（"先去 GitHub 找模型，不要自己造轮子"），重要选型希望先给方案对比再执行
+- 治理偏好：以 init-agent-docs 当前 skill 为基准；`AGENTS.md` 单一入口，不保留 `CLAUDE.md` / `GEMINI.md` 同步副本
 - 关注点：可分发性（自包含、一键安装）、最终用户体验
 
 ## 项目约束

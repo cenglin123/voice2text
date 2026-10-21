@@ -6,11 +6,10 @@
     索引覆盖两类经验载体：.agents/memory/ 记忆条目 + docs/problems/bugfix/ 文档——
     后者是经验检索统一入口的一部分，bugfix 目录不存在时自动跳过）
 2. 运行 audit.py check（死链 / 结构完整性 / 依赖漂移 / 记忆健康）
-3. 运行 agent_links.py check（AGENTS / CLAUDE / GEMINI 同步一致性）
-4. 记忆活性统计（30 天未更新预警，统计范围含 bugfix 文档）
-5. 审计触发器（距上次审计裁决超过 30 天则 WARN 提醒；机械化的是"该审计了"，
+3. 记忆活性统计（30 天未更新预警，统计范围含 bugfix 文档）
+4. 审计触发器（距上次审计裁决超过 30 天则 WARN 提醒；机械化的是"该审计了"，
    不是"文档是否陈旧"——治理文档正确性是事件驱动的，mtime 对比只会产生假警报）
-6. 近期上下文摘要（git log + CHANGELOG 标题树，辅助 agent 快速恢复脉络）
+5. 近期上下文摘要（git log + CHANGELOG 标题树，辅助 agent 快速恢复脉络）
 
 用法：
     python scripts/maintain.py                 # 完整维护：重建索引 + 全部检查 + 报告
@@ -324,7 +323,7 @@ def audit_recency() -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# delegated checks (audit.py / agent_links.py)
+# delegated checks (audit.py)
 # ---------------------------------------------------------------------------
 
 def _run_script(rel: str, *args: str) -> tuple[int, str] | None:
@@ -417,19 +416,8 @@ def run_full(*, check_only: bool) -> int:
     else:
         rc, out = audit
         print(_line("ok" if rc == 0 else "fail", f"audit.py check (exit {rc})"))
-        if out and rc != 0:
-            for line in out.splitlines():
-                print(f"           {line}")
-        if rc != 0:
-            failures += 1
-
-    sync = _run_script("scripts/agent_links.py", "check")
-    if sync is None:
-        print(_line("skip", "agent_links.py not found"))
-    else:
-        rc, out = sync
-        print(_line("ok" if rc == 0 else "fail", f"agent_links.py check (exit {rc})"))
-        if out and rc != 0:
+        # 即使退出码为 0 也输出非空结果——LINGER 等时间型提醒不应被成功状态掩盖。
+        if out:
             for line in out.splitlines():
                 print(f"           {line}")
         if rc != 0:

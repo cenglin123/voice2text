@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-10-21
+
+### 对齐 init-agent-docs 治理体系 [governance]
+
+#### 变更内容
+- AGENTS.md 改为唯一入口：删除 CLAUDE.md / GEMINI.md 与 scripts/agent_links.py，README 同步更新。
+- pre-commit 重写为记忆结构兜底 + 治理文档变更提醒 + Python 语法兜底；新增 .gitattributes 固定钩子 LF，README 注明新克隆启用 hooksPath。
+- audit.py / check_all.py / maintain.py 移除同步检查，补 URL 解码死链修复；计划时间告警降为不阻塞提醒（仍显示 LINGER），归档计划不再报 LINGER——项目对上游的有意分歧，升级 skill 时需比对。
+- 补治理文档分级复查规则（准则段 ≥3 独立 reviewer）；审计清单对齐当前 init-agent-docs。
+- 见 docs/plans/completed/governance-upgrade.md。
+
+---
+
 ## 2026-09-24
 
 ### 发布 v0.1.4 Windows 自包含版本 [governance]

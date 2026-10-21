@@ -2,7 +2,8 @@
 
 Checks that init-agent-docs initialized files have not rotted:
 dead links, STRUCTURE index completeness, tech-stack drift between docs
-and manifests, birth-record presence, AGENTS.md line budget, sync health.
+and manifests, birth-record presence, AGENTS.md line budget, memory
+structure health.
 
 All subcommands are read-only — this tool never modifies files.
 """
@@ -11,14 +12,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 # Convention: this script lives at <project_root>/scripts/audit.py.
 ROOT = Path(__file__).resolve().parents[1]
@@ -148,6 +148,7 @@ def _resolve(target: str, source_dir: Path) -> Path:
     Per CommonMark spec, all paths are relative to the containing file except
     those starting with '/'. Absolute paths (/) are resolved against ROOT.
     """
+    target = unquote(target)
     if target.startswith("/"):
         return (ROOT / target.lstrip("/")).resolve()
     return (source_dir / target).resolve()
@@ -515,24 +516,6 @@ def _check_line_budget() -> list[dict[str, Any]]:
     return [{"kind": "line_budget", "status": status, "lines": line_count, "words": word_count}]
 
 
-def _check_sync() -> list[dict[str, Any]]:
-    script = ROOT / "scripts" / "agent_links.py"
-    if not script.is_file():
-        return [{"kind": "sync", "status": "skip", "detail": "agent_links.py not found"}]
-    try:
-        result = subprocess.run(
-            [sys.executable, str(script), "check"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return [{"kind": "sync", "status": "error", "detail": str(exc)}]
-    status = "ok" if result.returncode == 0 else "broken"
-    return [{"kind": "sync", "status": status, "detail": result.stdout.strip() or result.stderr.strip()}]
-
-
 # ---------------------------------------------------------------------------
 # memory
 # ---------------------------------------------------------------------------
@@ -549,12 +532,20 @@ def _check_memory() -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     memory_dir = ROOT / ".agents" / "memory"
 
-    # Small projects: memory dir absence is OK
+    # AGENTS.md 仍声明记忆入口时，目录缺失视为记忆系统被破坏；否则按小型项目跳过。
+    agents_md = ROOT / "AGENTS.md"
+    content = _read(agents_md) if agents_md.is_file() else ""
+    memory_expected = ".agents/memory/MEMORY.md" in content
+
     if not memory_dir.is_dir():
         results.append({
             "kind": "memory",
-            "status": "skip",
-            "detail": "No .agents/memory/ directory (small project or not enabled)",
+            "status": "missing" if memory_expected else "skip",
+            "detail": (
+                "AGENTS.md 声明记忆索引，但 .agents/memory/ 缺失"
+                if memory_expected
+                else "No .agents/memory/ directory (small project or not enabled)"
+            ),
         })
         return results
 
@@ -577,9 +568,7 @@ def _check_memory() -> list[dict[str, Any]]:
         })
 
     # Check AGENTS.md contains memory pointer and inline section
-    agents_md = ROOT / "AGENTS.md"
     if agents_md.is_file():
-        content = _read(agents_md)
         if ".agents/memory/MEMORY.md" not in content:
             results.append({
                 "kind": "memory",
@@ -630,8 +619,9 @@ def _check_plans() -> list[dict[str, Any]]:
       or legacy blockquote metadata format — should be moved or reformatted.
     - MISPLACED (status=misplaced): plan in completed/ with in_progress status
       — should be in active/.
-    - LINGER (status=linger): plan is older than _STALE_DAYS without
-      recent modification — possible candidate for archival review.
+    - LINGER (status=linger): active plan is older than _STALE_DAYS without
+      recent modification — 提醒复核（不阻塞退出码）。completed/ 是归档态，
+      不参与 LINGER 判定。
     """
     results: list[dict[str, Any]] = []
     plans_root = ROOT / "docs" / "plans"
@@ -691,7 +681,8 @@ def _check_plans() -> list[dict[str, Any]]:
             except OSError:
                 age_days = 0.0
 
-            if age_days > _STALE_DAYS:
+            if folder == "active" and age_days > _STALE_DAYS:
+                # 只有进行中的计划才是"停滞"信号；completed/ 是归档态，内容本就不再修改。
                 results.append({
                     "kind": "plans",
                     "status": "linger",
@@ -724,7 +715,6 @@ def _run_all() -> list[dict[str, Any]]:
     results.extend(_drift_check())
     results.extend(_check_birth_record())
     results.extend(_check_line_budget())
-    results.extend(_check_sync())
     results.extend(_check_memory())
     results.extend(_check_plans())
     return results
@@ -743,8 +733,6 @@ _STATUS_GLYPHS: dict[str, str] = {
     "undocumented":"UNDOC",
     "warn":        "WARN",
     "found":       "FOUND",
-    "broken":      "BROKEN",
-    "error":       "ERROR",
     "skip":        "SKIP",
     "empty":       "EMPTY",
     "unlinked":    "UNLINK",
@@ -794,13 +782,6 @@ def _format_text(results: list[dict[str, Any]], verbose: bool = False) -> str:
                 lines_out.append(
                     f"[OK    ] AGENTS.md: {r['lines']} lines / {r['words']} words (limit 250/400)"
                 )
-        elif kind == "sync":
-            if r["status"] == "broken":
-                lines_out.append(f"[BROKEN ] AGENTS.md/CLAUDE.md/GEMINI.md out of sync")
-            elif r["status"] == "error":
-                lines_out.append(f"[ERROR  ] sync check failed: {r['detail']}")
-            elif r["status"] == "skip":
-                lines_out.append("[SKIP   ] sync check (agent_links.py unavailable)")
         elif kind == "memory":
             if r["status"] == "skip":
                 lines_out.append("[SKIP   ] memory (no .agents/memory/ directory)")
@@ -836,7 +817,8 @@ def _cmd_check(args: argparse.Namespace) -> None:
     else:
         print(_format_text(results, verbose=args.verbose))
 
-    has_issues = any(r["status"] not in ("ok", "found", "skip") for r in results)
+    # LINGER 是时间启发式提醒，不参与退出码——避免为了消警而做凑数编辑（Goodhart）。
+    has_issues = any(r["status"] not in ("ok", "found", "skip", "linger") for r in results)
     if has_issues:
         raise SystemExit(1)
 
@@ -877,7 +859,7 @@ def _cmd_plans(args: argparse.Namespace) -> None:
         print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
         print(_format_text(results, verbose=args.verbose))
-    has_issues = any(r["status"] not in ("ok",) for r in results)
+    has_issues = any(r["status"] not in ("ok", "linger") for r in results)
     if has_issues:
         raise SystemExit(1)
 

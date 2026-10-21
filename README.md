@@ -77,6 +77,8 @@ voice2text/
 
 **提交规范**：Conventional Commit 风格（`feat:` / `fix:` / `chore:` 等）。
 
+首次克隆后运行 `git config core.hooksPath .githooks` 启用治理钩子（需要 Git for Windows 提供 bash）：钩子兜底记忆目录结构、提醒治理文档独立复查，并对暂存区 Python 文件做语法检查。
+
 ## AI Agent 协作
 
-本仓库配置了面向 AI Agent 的文档体系。如果你是 AI Agent，请加载 [AGENTS.md](AGENTS.md)（或 [CLAUDE.md](CLAUDE.md) / [GEMINI.md](GEMINI.md)）获取行为规则和信息导航。
+本仓库配置了面向 AI Agent 的文档体系。如果你是 AI Agent，请加载 [AGENTS.md](AGENTS.md) 获取行为规则和信息导航（唯一入口）。

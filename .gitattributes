@@ -1,0 +1,2 @@
+# 钩子脚本以 LF 检出，避免 Windows 上 CRLF 破坏 bash 解释器
+.githooks/* text eol=lf

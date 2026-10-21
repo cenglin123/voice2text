@@ -20,11 +20,17 @@
   自然停顿的标点模型参考最近 32 字只读原文，停止后的校对块参考前后各至多 24 字，
   只替换当前块并防止连续块末尾误加句号。
 - 用户本地 `config.json` 有未提交修改，继续排除提交和分发产物。
+- 治理体系已对齐 init-agent-docs 当前版：`AGENTS.md` 单一入口，三文件同步体系（含同步脚本）
+  已清退；审计/维护脚本与 pre-commit 钩子无同步残留，并新增治理文档分级复查规则。
+  详见 `docs/plans/completed/governance-upgrade.md`。
 
 ## 当前验证
 
 - `python scripts/check_all.py --quiet` 通过；设置页 150%/200%、悬浮窗 150%、托盘菜单
   150% 的模拟缩放回归通过。托盘图标已在模拟浅色与深色背景目视检查。
+- 治理升级后 `check_all.py --quiet`、`audit.py check`、`maintain.py --check` 均通过；
+  治理文档改动已按硬约束分级，由 3 名独立 reviewer 复查（结论见
+  `docs/plans/completed/governance-upgrade.md`）。
 - 本地 `dist/voice2text-v0.1.4-windows-x64.zip` 为 471,874,103 字节，SHA-256：
   `e113407a11a7e5fbb23863564b003468e1fb0a47c7de0e96a193cea34af604c7`。
   压缩包 CRC、核心新增文件、默认配置和源码基线隐私范围已核对；GitHub Release 的

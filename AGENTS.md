@@ -1,19 +1,11 @@
 # AI 协作规范
 
-> 本文件会被 AI 框架自动加载并始终驻留在上下文中，因此必须保持精简（≤ 250 行）。
-> 只放行为规则和信息指针，不放可从代码或其他文档获取的事实描述。
+> 本文件是唯一行为入口，被 AI 框架自动加载并始终驻留在上下文中，因此必须保持精简（≤ 250 行）。
+> 只放行为规则和信息指针，不放可从代码或其他文档获取的事实描述；不设同步副本。
 
 ## 项目概述
 
 voice2text：Windows 桌面语音听写工具。按下 Alt+V 开始/停止听写，麦克风音频经 sherpa-onnx 流式识别后实时输入到当前光标所在的可编辑文本框；再次按 Alt+V 停止后由本地 Qwen 小模型（GGUF + llama-cpp-python）对本次内容统一二次校对（错别字、赘余语气词、标点、通顺度）并替换已上屏文本。听写期间屏幕文字只增不改。全部离线运行，面向最终用户一键安装分发。
-
-## 同步声明
-
-`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 内容必须保持一致。**只编辑 AGENTS.md**，另两个由脚本同步。
-
-- `python scripts/agent_links.py check --mode copy`
-- `python scripts/agent_links.py repair --mode copy --force`
-- 模式：copy
 
 ## 信息导航
 
@@ -59,6 +51,7 @@ Bugfix 任务（修复 / bug / 报错 / 异常等）必须先查索引段的 bug
 
 ### 硬约束（不可违反）
 
+- **治理文档改动必须独立复查**：治理文档清单（封闭枚举：AGENTS.md、`docs/STRUCTURE.md`、`docs/audit-checklist.md`、`docs/problems/bugfix/_template.md`、`scripts/audit.py`、`scripts/check_all.py`、`scripts/maintain.py`、`scripts/changelog.py`、`.githooks/`、`.gitattributes`）无论改动规模，必须由独立视角复查；新增、删除或重定义**准则段**至少 3 名互不相同的独立 reviewer，其余治理改动至少 1 名。**独立** = 未参与起草且不共享作者上下文（新会话或非 fork 的 subagent），结论与证据记入计划任务表或审计记录。**准则段**以 `##`/`###` 小节、列表项或命令块为最小单位；在既有准则项中增删或改变要求按重定义计。新增治理载体须先登记到本清单。`docs/plans/`、`.agents/memory/` 是按需读取的交接/派生文档，不属本款；其中新增的行为规则应提升到本文件或 `docs/audit-checklist.md`。业务检查脚本（如 `check_widget.py`）与说明文档（如 `docs/overview.md`、`docs/pitfalls.md`）不属本款。
 - **本地推理**：识别、标点、校对不得调用云端推理 API。基础分发包自带运行时、依赖和语音/标点模型；模型下载只允许安装期或用户在设置中显式发起的可选校对模型安装，使用固定来源。
 - **模型文件不入库**：`models/` 目录（sherpa-onnx 模型、Qwen GGUF，体积大）不进 git，由安装脚本下载
 - **一键安装**：`install.bat` 必须能从干净 Windows 机器拉起完整环境（venv + 依赖 + 模型），破坏此性质即破坏核心需求
@@ -70,9 +63,9 @@ Bugfix 任务（修复 / bug / 报错 / 异常等）必须先查索引段的 bug
 - **Occam**：如无必要，勿增实体。
 - **Bitter Lesson**：通用方法优于硬编码先验。
 - **模式匹配**：单会话小任务用直接执行；跨模块/跨会话任务走当前选定的控制器下的「复杂任务闭环」：
-  1. `docs/plans/active/` 落盘计划 → 2. 独立视角审查 → 3. 用户确认 → 4. 执行 → 5. 验收
+  1. `docs/plans/active/` 落盘计划 → 2. 独立视角审查（治理文档按「硬约束 → 治理文档改动必须独立复查」分级）→ 3. 用户确认 → 4. 执行 → 5. 验收
 - **任务启动先读 CURRENT.md**。
-- **验证尽量换视角**：高风险改动优先由新上下文或 reviewer 视角复查。
+- **验证尽量换视角**：高风险（跨模块/跨会话）改动优先由新上下文或 reviewer 视角复查。
 - **代码风格**：Python 3.10+，4 空格缩进，中文注释与文档，类型标注用于公共函数。
 - **Windows 优先**：本项目只面向 Windows；脚本用 .bat + Python，避免 bash-only 语法（Git Bash 可用于开发期命令）。
 
@@ -109,6 +102,6 @@ python scripts/check_all.py --quiet
 无输出 = 机械层通过。每条 FAIL 自带修复指引。
 
 机械层通过后再确认：
-- [ ] 有高风险改动且没经过独立视角复查？→ 新上下文或 subagent 复查
+- [ ] 高风险（跨模块/跨会话）或治理文档改动已按分级独立复查（治理文档：准则段 ≥3、其余 ≥1），结论已记录
 - [ ] 本次对话有值得沉淀的记忆？→ 更新 `.agents/memory/` 并同步 AGENTS 内联摘要
 - [ ] 纯格式修改/注释修改/同一会话已记录？→ 文档更新可跳过（验证不跳过）

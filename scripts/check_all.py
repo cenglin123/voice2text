@@ -6,10 +6,10 @@
 1. --quiet 模式下，无输出 = 全部通过（不消耗 agent 注意力）
 2. 每条 FAIL 自带修复指引（agent 不需要记忆"失败后做什么"）
 3. CHECKS 列表是检查项的单一权威源——AGENTS.md 只引用本脚本，不枚举覆盖范围
-4. 只检查"本次任务是否遗漏了必做项"（~5项），不属于深度审计；深度审计交给 audit.py
+4. 只检查"本次任务是否遗漏了必做项"（项目专检 + 通用项，~8项），不属于深度审计；深度审计交给 audit.py
 
 与 audit.py 的分工：
-    check_all.py  → 高频完工检查（每次任务后跑，静默，~5 项）
+    check_all.py  → 高频完工检查（每次任务后跑，静默，~8 项）
     audit.py      → 深度定期审计（每 ~20 次任务或每月跑，详实输出，~15 项）
 
 用法：
@@ -65,13 +65,6 @@ def _run(name: str, cmd: list[str]) -> tuple[bool, str]:
 CHECKS: list[tuple[str, callable, str]] = []
 
 
-def _check_sync():
-    ok, detail = _run("同步", ["scripts/agent_links.py", "check"])
-    return ok, detail
-
-CHECKS.append(("同步", _check_sync, "按 AGENTS.md「同步声明」中的精确命令修复"))
-
-
 def _check_changelog():
     if not _has_file("docs/CHANGELOG.md"):
         return False, "docs/CHANGELOG.md 不存在"
@@ -95,9 +88,17 @@ CHECKS.append(("行数", _check_line_budget,
 
 
 def _check_memory_touch():
-    """检查记忆系统最近是否有写入（中型+项目）。"""
+    """检查记忆系统健康（中型+项目）。"""
     mem_dir = ROOT / ".agents" / "memory"
+    agents = ROOT / "AGENTS.md"
+    agents_text = ""
+    try:
+        agents_text = agents.read_text(encoding="utf-8") if agents.is_file() else ""
+    except (OSError, UnicodeDecodeError):
+        pass
     if not mem_dir.is_dir():
+        if ".agents/memory/MEMORY.md" in agents_text:
+            return False, ".agents/memory/ 缺失，但 AGENTS.md 仍声明记忆索引——记忆系统被删除或未初始化"
         return True, ""  # 小型项目，无记忆系统
     # 检查 MEMORY.md 最近修改时间
     mem_file = mem_dir / "MEMORY.md"

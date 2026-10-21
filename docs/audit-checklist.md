@@ -7,15 +7,17 @@
 
 运行 `python scripts/audit.py check`，对每个非 OK 项逐条复核。
 
-> **首次审计注意**：`audit.py` 内置的 DRIFT_PATTERNS 只覆盖常见技术栈。如果本项目使用了字典外的技术（如 sherpa-onnx、llama-cpp-python 未覆盖），应编辑 `scripts/audit.py` 的 `DRIFT_PATTERNS` 字典追加关键词。
+> **技术栈漂移字典**：新增依赖时同步追加 `scripts/audit.py` 的 `DRIFT_PATTERNS` 关键词；通用字典是起点，不是终点。
 
 - [ ] 死链：是文件被移动了？还是 AGENTS.md 指针过时？
 - [ ] STRUCTURE 索引偏差：docs/ 下多了/少了文件？更新索引或清理孤儿文件。
-- [ ] 同步断裂：按 AGENTS.md「同步声明」中的精确命令修复。
+- [ ] 计划目录：active/ 里有已完成或停滞计划？completed/ 混入进行中计划？停滞计划复核后在本次「审计记录」留痕（LINGER 是提醒，不阻塞机械层）。
 - [ ] 行数警告：AGENTS.md 超过 250 行？如有内容可下沉到 docs/，执行下沉。
 - [ ] 依赖漂移：文档声明的技术栈与实际 manifest 不符？更新文档或确认为误报。
 - [ ] 出生档案：缺失则从 Git history / 当前状态重建。
 - [ ] 记忆系统：`.agents/memory/MEMORY.md` 空壳或断链？AGENTS.md 内联记忆段缺失或过时？`python scripts/audit.py memory` 逐项复核。
+- [ ] 单一入口不变式：根目录无 `CLAUDE.md` / `GEMINI.md` 副本，`scripts/agent_links.py` 不存在。
+- [ ] 钩子不变式：`.githooks/pre-commit` 与 `.pre-commit-config.yaml` 不调用同步脚本。
 
 ## 2. 关键设计决策仍成立？
 
@@ -38,7 +40,7 @@
 
 ## 5. 完工
 
-- [ ] 审计期间的修改已通过 AGENTS.md「同步声明」中的检查命令
+- [ ] 审计期间的修改已通过 `python scripts/check_all.py --quiet`
 - [ ] 审计结果写入 CHANGELOG：
   ```bash
   python scripts/changelog.py add \
@@ -53,3 +55,10 @@
 - 2026-09-22 — 首次完整审计。修正 CURRENT 的发行态、输入通道、UIPI、持久化数据和下一版
   边界；为 sherpa-onnx、llama-cpp-python、桌面输入与 GUI 依赖增加漂移检测并补齐设计说明。
   机械检查无遗留；微信、WPS、Windows Terminal 与 VM 仍按 CURRENT 进行真机验收。
+- 2026-10-21 — 治理体系升级：清退三文件同步体系（`agent_links.py`、`CLAUDE.md`、
+  `GEMINI.md`），脚本与钩子对齐当前 init-agent-docs，补治理文档分级复查规则。
+  机械检查（check_all / audit.py check / maintain.py --check）通过；复核全部 4 个活跃计划
+  （MVP、性能可靠性、Windows 发行验证、本升级计划），均保持 in_progress 或本日归档，
+  等待用户真机验收；计划 LINGER 已降为不阻塞的提醒，不以修改 mtime 消警。
+  治理改动经 3 名独立 reviewer 复查，结论见 `docs/plans/completed/governance-upgrade.md`。
+  遗留：`docs/CURRENT.md` 中的真机验收项不变。
