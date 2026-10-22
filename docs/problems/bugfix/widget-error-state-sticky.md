@@ -5,8 +5,8 @@ title: 悬浮窗不可用状态不会自动恢复
 status: fixed
 severity: low
 liveness: active
-last_confirmed: "2026-09-23"
-confirmed_count: 1
+last_confirmed: "2026-10-22"
+confirmed_count: 2
 tags: [widget, state, error, usability]
 related_files: [voice2text/widget.py, scripts/check_widget.py]
 verification:
@@ -18,7 +18,7 @@ evidence:
   - type: user_quote
     ref: "悬浮窗只要触发过不可用状态，即使选择其它可输入的位置，只要不去启动它以覆盖状态，悬浮窗会一直显示不可用"
 created_at: 2026-09-23
-updated_at: 2026-09-23
+updated_at: 2026-10-22
 ---
 
 # 悬浮窗不可用状态不会自动恢复
@@ -54,7 +54,8 @@ updated_at: 2026-09-23
 
 ## 风险和后续
 
-错误详情仍保留在运行输出中；悬浮窗只负责短暂状态提示，因此自动复位不会丢失诊断信息。
+错误详情保留在运行输出中；普通输入目标捕获或启动失败还会显示 7.5 秒原因卡，
+状态灯的两秒复位不会提前清除原因卡。详见 `target-start-failure-notice.md`。
 
 ## 变更历史
 

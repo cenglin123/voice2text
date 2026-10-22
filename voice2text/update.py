@@ -4,12 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
 import threading
+import time
 import urllib.request
 import uuid
 import zipfile
@@ -20,6 +22,7 @@ from voice2text.config import PROJECT_ROOT
 REPOSITORY = "cenglin123/voice2text"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 _ASSET = re.compile(r"voice2text-v(?P<version>\d+\.\d+\.\d+)-windows-x64\.zip$")
+AUTO_CHECK_INTERVAL = 86400.0
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
@@ -97,6 +100,11 @@ class UpdateManager:
         self._snapshot = UpdateSnapshot()
         self._active = False
         self._closing = False
+        self._automatic = False
+        self._installing = False
+        self._ready_fingerprint: tuple[int, int] | None = None
+        self._last_attempt_loaded = False
+        self._last_attempt: float | None = None
 
     @property
     def supported(self) -> bool:
@@ -108,21 +116,118 @@ class UpdateManager:
 
     def _set(self, **values) -> None:
         with self._lock:
+            if self._closing:
+                return
             current = self._snapshot.__dict__.copy()
             current.update(values)
             self._snapshot = UpdateSnapshot(**current)
 
-    def start(self) -> bool:
+    def _attempt_path(self) -> Path:
+        root = str(self.project_root.resolve()).casefold().encode("utf-8", errors="surrogatepass")
+        key = hashlib.sha256(root).hexdigest()
+        folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "voice2text" / "updates"
+        return folder / f"auto-{key}.json"
+
+    def _read_last_attempt(self) -> float | None:
+        try:
+            value = json.loads(self._attempt_path().read_text(encoding="utf-8"))
+            timestamp = value.get("last_attempt") if isinstance(value, dict) else None
+            if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+                return None
+            timestamp = float(timestamp)
+            return timestamp if math.isfinite(timestamp) and timestamp >= 0 else None
+        except (OSError, ValueError, TypeError, UnicodeError):
+            return None
+
+    def _write_last_attempt(self, timestamp: float) -> None:
+        path = self._attempt_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps({"last_attempt": timestamp}), encoding="utf-8")
+            temporary.replace(path)
+        except OSError:
+            # Persistence is best-effort; a read-only profile must not block updates.
+            pass
+
+    def start(self, automatic: bool = False) -> bool:
         with self._lock:
-            if self._active or self._closing:
+            if self._active or self._closing or self._installing or self._snapshot.state == "ready":
                 return False
             if not self.supported:
                 self._snapshot = UpdateSnapshot("unsupported", "仅自包含安装版支持一键更新")
                 return False
             self._active = True
+            self._automatic = automatic
+            if not automatic:
+                self._last_attempt = time.time()
+                self._last_attempt_loaded = True
+                self._write_last_attempt(self._last_attempt)
             self._snapshot = UpdateSnapshot("checking", "正在检查 GitHub 最新版本…")
         threading.Thread(target=self._run, daemon=True).start()
         return True
+
+    def tick_auto(self, enabled: bool, busy: bool, now: float | None = None) -> UpdateSnapshot | None:
+        """在 GUI 主线程轮询；只启动后台检查或领取已验证的自动更新包。"""
+        if not enabled:
+            return None
+        timestamp = now if now is not None else time.time()
+        if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool) or not math.isfinite(timestamp) or timestamp < 0:
+            timestamp = time.time()
+        with self._lock:
+            if self._closing or self._installing or not self.supported:
+                return None
+            if self._snapshot.state == "ready":
+                return self._snapshot if self._automatic and not busy else None
+            if self._active:
+                return None
+            if not self._last_attempt_loaded:
+                self._last_attempt = self._read_last_attempt()
+                self._last_attempt_loaded = True
+            last_attempt = self._last_attempt
+            # A clock rollback invalidates the saved future timestamp instead of
+            # suppressing checks indefinitely.
+            if last_attempt is not None and timestamp >= last_attempt and timestamp - last_attempt < AUTO_CHECK_INTERVAL:
+                return None
+            self._last_attempt = timestamp
+            self._write_last_attempt(timestamp)
+        return self._start_auto()
+
+    def _start_auto(self) -> UpdateSnapshot | None:
+        # start() owns state transitions and thread creation; the timestamp was
+        # recorded first so a crash immediately after dispatch remains throttled.
+        self.start(automatic=True)
+        return None
+
+    def begin_install(self, archive: Path, version: str) -> bool:
+        with self._lock:
+            if self._closing or self._installing or self._snapshot.state != "ready":
+                return False
+            if self._snapshot.archive != archive or self._snapshot.version != version:
+                return False
+            try:
+                stat = archive.stat()
+                fingerprint = (stat.st_size, stat.st_mtime_ns)
+            except OSError as exc:
+                fingerprint = None
+                failure = f"更新包已不可用：{exc}"
+            else:
+                failure = "更新包在后台校验后发生变化，拒绝安装"
+            if fingerprint is None or fingerprint != self._ready_fingerprint:
+                self._snapshot = UpdateSnapshot("error", failure, version, archive)
+                self._ready_fingerprint = None
+                return False
+            self._installing = True
+            self._snapshot = UpdateSnapshot("installing", f"正在安装 v{version}…", version, archive)
+            return True
+
+    def install_failed(self, exc: Exception) -> None:
+        with self._lock:
+            if not self._installing:
+                return
+            self._installing = False
+            current = self._snapshot
+            self._snapshot = UpdateSnapshot("error", f"安装失败：{exc}", current.version, current.archive)
 
     @staticmethod
     def _open(url: str):
@@ -154,9 +259,15 @@ class UpdateManager:
         part.replace(destination)
 
     def _run(self) -> None:
+        with self._lock:
+            if self._closing:
+                self._active = False
+                return
         try:
             with self._open(API_URL) as response:
                 release = json.load(response)
+            if release.get("draft") or release.get("prerelease"):
+                raise ValueError("拒绝安装草稿版或预发行版")
             latest = str(release.get("tag_name", "")).removeprefix("v")
             if version_tuple(latest) <= version_tuple(__version__):
                 self._set(state="current", message=f"当前已是最新版本 v{__version__}", version=latest)
@@ -177,9 +288,15 @@ class UpdateManager:
                 archive.unlink(missing_ok=True)
                 raise ValueError("更新包 SHA-256 校验失败")
             validate_archive(archive, version)
-            self._set(state="ready", message=f"v{version} 已下载并验证，可以安装", archive=archive)
+            stat = archive.stat()
+            with self._lock:
+                if not self._closing:
+                    self._ready_fingerprint = (stat.st_size, stat.st_mtime_ns)
+                    self._snapshot = UpdateSnapshot("ready", f"v{version} 已下载并验证，可以安装", version, archive)
         except Exception as exc:
-            self._set(state="error", message=f"更新失败：{exc}")
+            with self._lock:
+                if not self._closing:
+                    self._snapshot = UpdateSnapshot("error", f"更新失败：{exc}")
         finally:
             with self._lock:
                 self._active = False
@@ -187,12 +304,15 @@ class UpdateManager:
     def close(self) -> None:
         with self._lock:
             self._closing = True
+            if self._active:
+                self._snapshot = UpdateSnapshot("idle", "更新下载已取消")
 
 
-def launch_installer(archive: Path, version: str, process_id: int) -> None:
+def launch_installer(archive: Path, version: str, process_id: int, *, prevalidated: bool = False) -> None:
     if not (PROJECT_ROOT / "offline-bundle.txt").is_file():
         raise RuntimeError("当前不是自包含安装版")
-    validate_archive(archive, version)
+    if not prevalidated:
+        validate_archive(archive, version)
     update_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "voice2text" / "updates"
     update_dir.mkdir(parents=True, exist_ok=True)
     script = update_dir / f"apply-{uuid.uuid4().hex}.ps1"

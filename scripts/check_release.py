@@ -100,7 +100,7 @@ def _check_cmd_wrappers(root: Path, archive: zipfile.ZipFile, prefix: str) -> No
     comspec = __import__("os").environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
     try:
         mklink = f'"{comspec}" /d /c mklink /J "{runtime}" "{Path(sys.executable).parent}"'
-        subprocess.run(mklink, check=True, capture_output=True, text=True, timeout=10,
+        subprocess.run(mklink, check=True, capture_output=True, text=True, encoding="mbcs", errors="replace", timeout=10,
                        stdin=subprocess.DEVNULL)
         assert (runtime / "python.exe").is_file(), "junction runtime missing python.exe"
         assert (fixture / "offline-bundle.txt").is_file()
@@ -108,12 +108,12 @@ def _check_cmd_wrappers(root: Path, archive: zipfile.ZipFile, prefix: str) -> No
         env.pop("PYTHONPATH", None)
         for entry in ("安装程序.bat", "install.bat"):
             command = f'"{comspec}" /d /c call "{fixture / entry}"'
-            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True,
+            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True, encoding="mbcs", errors="replace",
                                     timeout=10, stdin=subprocess.DEVNULL, env=env)
             assert result.returncode == 0, (command, result.returncode, result.stdout, result.stderr)
         for entry in ("启动程序.bat", "run.bat"):
             command = f'"{comspec}" /d /c call "{fixture / entry}" --debug'
-            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True,
+            result = subprocess.run(command, cwd=fixture, capture_output=True, text=True, encoding="mbcs", errors="replace",
                                     timeout=10, stdin=subprocess.DEVNULL, env=env)
             assert result.returncode == 0, (command, result.returncode, result.stdout, result.stderr)
         calls = log.read_text(encoding="utf-8").splitlines()
@@ -202,9 +202,9 @@ def main() -> int:
         (install / "config.json").write_text('{"private":"keep-out"}', encoding="utf-8")
         feedback = root / "feedback"
         subprocess.run(
-            [sys.executable, str(install / "scripts/export_feedback.py"),
+            [sys.executable, "-X", "utf8", str(install / "scripts/export_feedback.py"),
              "--output-dir", str(feedback), "--summary", "目标验证异常"],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, encoding="utf-8",
         )
         diff_text = (feedback / "修复.diff").read_text(encoding="utf-8")
         report_text = (feedback / "反馈.md").read_text(encoding="utf-8")

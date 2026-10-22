@@ -188,6 +188,8 @@ class DictationApp:
                 self.push_state("error")
                 if isinstance(exc, ElevatedTargetError):
                     self.cmd_queue.put(("elevation_notice", str(exc)))
+                else:
+                    self.cmd_queue.put(("target_notice", str(exc)))
                 return
             self._session_thread = threading.Thread(target=self._start_toggle, daemon=True)
         self._session_thread.start()
@@ -195,6 +197,7 @@ class DictationApp:
     def _start_toggle(self) -> None:
         import pythoncom
         pythoncom.CoInitialize()
+        failure_reason = None
         try:
             self._start_session()
             self.push_state("listening" if self._active else "idle")
@@ -202,11 +205,14 @@ class DictationApp:
             print(f"[听写未开始] {exc}")
             self._capture.stop()
             self.push_state("error")
+            failure_reason = str(exc)
         finally:
             if not self._active:
                 self._inserter.end_session()
             self._busy = False
             pythoncom.CoUninitialize()
+            if failure_reason is not None:
+                self.cmd_queue.put(("target_notice", failure_reason))
 
     def _finish_toggle(self, token: int) -> None:
         import pythoncom
@@ -539,6 +545,7 @@ class DictationApp:
             cfg_dict["input_device"] = self._cfg.input_device
             print(f"[设置] 输入设备更改失败（{exc}），保留原设备")
         self._cfg.proofread_enabled = bool(cfg_dict.get("proofread_enabled", True))
+        self._cfg.auto_update_enabled = bool(cfg_dict.get("auto_update_enabled", True))
         self._cfg.sound_cue = bool(cfg_dict.get("sound_cue", True))
         self._cfg.widget_scale = float(cfg_dict.get("widget_scale", 1.0))
         self._cfg.widget_aspect = float(cfg_dict.get("widget_aspect", 3.27))
@@ -547,6 +554,30 @@ class DictationApp:
         self.apply_settings_scale = (self._cfg.widget_scale, self._cfg.widget_opacity, self._cfg.widget_aspect)
         self.apply_settings_font_scale = self._cfg.font_scale
         return dict(cfg_dict)
+
+
+def auto_install_blocked(app: DictationApp, *, settings_open: bool = False,
+                         model_download_active: bool = False, notice_visible: bool = False) -> bool:
+    """自动重启须避开听写、准备、校对、用户设置与显式模型下载。"""
+    return bool(app._closing or app._active or app._busy or not app._models_ready.is_set()
+                or settings_open or model_download_active or notice_visible)
+
+
+def apply_verified_update(app: DictationApp, manager, archive: Path, version: str) -> bool:
+    """领取后台已验证的更新；安装器成功交接后才允许主循环退出。"""
+    if app._active or app._busy or app._closing or not manager.begin_install(archive, version):
+        return False
+    from voice2text.update import launch_installer
+    app._closing = True  # 安装交接期间拒绝新听写，避免退出与热键竞争。
+    try:
+        launch_installer(archive, version, os.getpid(), prevalidated=True)
+    except Exception as exc:
+        app._closing = False
+        manager.install_failed(exc)
+        print(f"[更新] 无法启动安装，当前程序继续运行：{exc}")
+        return False
+    print(f"[更新] v{version} 已验证，程序即将退出并安装")
+    return True
 
 
 def _gui_main(output) -> int:
@@ -632,6 +663,14 @@ def _gui_main(output) -> int:
         on_resize=widget_resized,
     )
 
+    from voice2text.update import update_manager
+
+    def apply_update(archive, version) -> None:
+        if apply_verified_update(app, update_manager, archive, version):
+            raise SystemExit
+
+    last_update_poll = [0.0]
+
     def drain_cmds() -> None:
         while True:
             try:
@@ -657,6 +696,7 @@ def _gui_main(output) -> int:
                         "widget_aspect": cfg.widget_aspect,
                         "widget_opacity": cfg.widget_opacity,
                         "proofread_enabled": cfg.proofread_enabled,
+                        "auto_update_enabled": cfg.auto_update_enabled,
                         "sound_cue": cfg.sound_cue,
                         "font_scale": cfg.font_scale,
                         "input_device": cfg.input_device,
@@ -687,6 +727,9 @@ def _gui_main(output) -> int:
                     ui.debug = DebugWindow(ui.widget.root, output)
                 else:
                     ui.debug.show()
+            elif cmd == "target_notice":
+                if not app._active and not app._busy:
+                    ui.widget.show_notice(str(payload))
             elif cmd == "elevation_notice":
                 from tkinter import messagebox
 
@@ -695,11 +738,7 @@ def _gui_main(output) -> int:
                 if app._active or app._busy:
                     print("[更新] 请先等待听写和校对结束")
                     continue
-                archive, version = payload
-                from voice2text.update import launch_installer
-                launch_installer(archive, version, os.getpid())
-                print(f"[更新] v{version} 已验证，程序即将退出并安装")
-                raise SystemExit
+                apply_update(*payload)
             elif cmd == "quit":
                 raise SystemExit
 
@@ -710,6 +749,17 @@ def _gui_main(output) -> int:
         ui.widget.pump(app.ui_queue)
         drain_cmds()
         app.tick()
+        now = time.monotonic()
+        if now - last_update_poll[0] >= 1.0:
+            last_update_poll[0] = now
+            from voice2text.model_download import model_download
+            settings_open = ui.settings is not None and ui.settings.root.winfo_exists()
+            blocked = auto_install_blocked(app, settings_open=bool(settings_open),
+                                           model_download_active=model_download.snapshot()[0],
+                                           notice_visible=ui.widget._notice_window is not None)
+            pending = update_manager.tick_auto(cfg.auto_update_enabled, bool(blocked))
+            if pending is not None:
+                apply_update(pending.archive, pending.version)
         if app.apply_settings_scale:  # 设置保存后应用新外观（M1/M2：主线程 ui.widget）
             widget_scale, widget_opacity, widget_aspect = app.apply_settings_scale
             ui.widget.apply_appearance(widget_scale, widget_opacity, widget_aspect)

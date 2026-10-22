@@ -16,10 +16,13 @@ import tkinter
 from PIL import Image, ImageTk
 
 from voice2text import layered
-from voice2text.dpi import enable_dpi_awareness, window_scale
+from voice2text.dpi import enable_dpi_awareness, window_scale, window_workarea
 
 KEY_COLOR = "#10161F"  # transparentcolor 魔法色——取接近药丸底色的深藏青，边缘混合不显黑边
 ERROR_RESET_MS = 2000
+NOTICE_DURATION_MS = 7500
+WS_EX_NOACTIVATE = 0x08000000
+SW_SHOWNOACTIVATE = 4
 
 from voice2text.widget_render import (
     BASE_W, BASE_H, MIN_ASPECT, MAX_ASPECT, CORNER_RADIUS, WidgetRenderer,
@@ -52,6 +55,11 @@ class DictationWidget:
         self._on_resize = on_resize
         self._state = "idle"
         self._error_reset_job = None
+        self._notice_window = None
+        self._notice_text = None
+        self._notice_title = None
+        self._notice_footer = None
+        self._notice_job = None
         self._phase = 0.0
         self.root = tkinter.Tk()
         self.root.withdraw()
@@ -81,6 +89,7 @@ class DictationWidget:
         self.root.deiconify()
         self._init_layered()
         self.root.bind("<Configure>", self._on_configure)
+        self.root.bind("<Destroy>", self._on_root_destroy, add="+")
         self._animate()
 
     @property
@@ -275,6 +284,8 @@ class DictationWidget:
 
     def set_state(self, state: str) -> None:
         """主线程调用：切换状态并重绘。"""
+        if state in ("loading", "listening", "proofreading"):
+            self._cancel_notice()
         if self._error_reset_job is not None:
             self.root.after_cancel(self._error_reset_job)
             self._error_reset_job = None
@@ -311,6 +322,129 @@ class DictationWidget:
         if self._backdrop is not None:
             self._backdrop.withdraw()
         self.root.withdraw()
+
+    def show_notice(self, message: str) -> None:
+        """在悬浮窗附近显示不抢焦点的输入位置提示，7.5 秒后自动关闭。"""
+        if self._notice_job is not None:
+            try:
+                self.root.after_cancel(self._notice_job)
+            except tkinter.TclError:
+                pass
+            self._notice_job = None
+
+        scale = self._dpi_scale
+        left, top, right, bottom = window_workarea(self.root)
+        work_w, work_h = max(1, right - left), max(1, bottom - top)
+        width = min(round(420 * scale), max(1, work_w - round(16 * scale)))
+        height = min(round(188 * scale), max(1, work_h - round(16 * scale)))
+        gap = round(12 * scale)
+        if self.root.winfo_viewable():
+            x = self.root.winfo_rootx() + (self._w - width) // 2
+            y = self.root.winfo_rooty() + self._h + gap
+            if y + height > bottom - round(8 * scale):
+                y = self.root.winfo_rooty() - height - gap
+        else:
+            x, y = right - width - round(16 * scale), bottom - height - round(16 * scale)
+        x = max(left + round(8 * scale), min(x, right - width - round(8 * scale)))
+        y = max(top + round(8 * scale), min(y, bottom - height - round(8 * scale)))
+
+        notice = self._notice_window
+        if notice is None or not notice.winfo_exists():
+            notice = tkinter.Toplevel(self.root)
+            self._notice_window = notice
+            notice.withdraw()
+            notice.overrideredirect(True)
+            notice.attributes("-topmost", True)
+            notice.configure(takefocus=False)
+            notice.configure(bg="#172334")
+            notice.title("未开始听写")
+            notice_frame = tkinter.Frame(notice, bg="#172334", padx=round(16 * scale), pady=round(12 * scale))
+            notice_frame.pack(fill="both", expand=True)
+            self._notice_title = tkinter.Label(
+                notice_frame, text="未开始听写", anchor="w", bg="#172334", fg="#FFFFFF",
+                font=("Microsoft YaHei UI", -round(16 * scale), "bold"), takefocus=False,
+            )
+            self._notice_title.pack(fill="x")
+            body = tkinter.Frame(notice_frame, bg="#172334")
+            body.pack(fill="both", expand=True, pady=(round(6 * scale), round(6 * scale)))
+            text = tkinter.Text(body, wrap="word", relief="flat", bd=0, padx=0, pady=0,
+                                bg="#172334", fg="#E8EEF7", insertwidth=0,
+                                font=("Microsoft YaHei UI", -round(14 * scale),),
+                                takefocus=False, state="disabled", height=5)
+            scrollbar = tkinter.Scrollbar(body, command=text.yview, takefocus=False)
+            text.configure(yscrollcommand=scrollbar.set)
+            text.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            self._notice_text = text
+            self._notice_footer = tkinter.Label(
+                notice_frame, text="请先点击输入框，再按快捷键开始听写。", anchor="w",
+                bg="#172334", fg="#B8C7DA",
+                font=("Microsoft YaHei UI", -round(12 * scale)), takefocus=False,
+            )
+            self._notice_footer.pack(fill="x")
+        else:
+            text = self._notice_text
+
+        text.configure(state="normal")
+        text.delete("1.0", "end")
+        text.insert("1.0", message)
+        text.configure(state="disabled")
+        notice.geometry(f"{width}x{height}+{x}+{y}")
+        notice.update_idletasks()
+        hwnd = layered.window_handle(notice.winfo_id())
+        user = ctypes.windll.user32
+        get_long = user.GetWindowLongW
+        get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        get_long.restype = ctypes.c_long
+        set_long = user.SetWindowLongW
+        set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+        set_long.restype = ctypes.c_long
+        exstyle = get_long(hwnd, -20)
+        set_long(hwnd, -20, exstyle | WS_EX_NOACTIVATE | 0x80)
+        user.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        user.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                      ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        user.SetWindowPos(hwnd, ctypes.c_void_p(-1), x, y, width, height, 0x0010 | 0x0040)
+        self._notice_job = self.root.after(NOTICE_DURATION_MS, self._dismiss_notice)
+
+    def _dismiss_notice(self) -> None:
+        self._notice_job = None
+        self._destroy_notice()
+
+    def _cancel_notice(self) -> None:
+        if self._notice_job is not None:
+            try:
+                self.root.after_cancel(self._notice_job)
+            except tkinter.TclError:
+                pass
+            self._notice_job = None
+        self._destroy_notice()
+
+    def _destroy_notice(self) -> None:
+        notice, self._notice_window = self._notice_window, None
+        self._notice_text = None
+        self._notice_title = None
+        self._notice_footer = None
+        if notice is not None:
+            try:
+                if notice.winfo_exists():
+                    notice.destroy()
+            except tkinter.TclError:
+                pass
+
+    def _on_root_destroy(self, event) -> None:
+        if event.widget is self.root:
+            if self._notice_job is not None:
+                try:
+                    self.root.after_cancel(self._notice_job)
+                except tkinter.TclError:
+                    pass
+                self._notice_job = None
+            self._notice_window = None
+            self._notice_text = None
+            self._notice_title = None
+            self._notice_footer = None
 
     def _resize_surface(self, width: int, height: int) -> None:
         self._w, self._h = width, height

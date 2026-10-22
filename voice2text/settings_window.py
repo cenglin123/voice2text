@@ -604,16 +604,20 @@ class SettingsWindow:
         self._mic_menu["menu"].config(bg=_CARD, fg=_TEXT, activebackground=_ACCENT,
                                       activeforeground="#FFFFFF", font=(_FONT, -12))
         self._mic_menu.pack(fill="x")
+        self._auto_update_var = tkinter.BooleanVar(value=bool(self._cfg.get("auto_update_enabled", True)))
         self._sound_var = tkinter.BooleanVar(value=bool(self._cfg.get("sound_cue", True)))
         self._autostart_var = tkinter.BooleanVar(value=get_autostart())
         general = card("general", "启动与提示", "按你的使用习惯设置")
+        about = card("about", "voice2text", "语音识别、标点与校对均在本机完成")
         self._toggles = []
         for label, sub, var in (
             ("开启二次校对", "停止听写后，自动整理标点与语句", self._proof_var),
             ("录音提示音", "开始和停止录音时播放提示音", self._sound_var),
             ("开机自启动", "随系统启动，随时开始听写", self._autostart_var),
+            ("自动更新", "每 24 小时检查 GitHub 正式版，空闲且关闭设置后自动安装并重启", self._auto_update_var),
         ):
-            row = tkinter.Frame(c3 if var is self._proof_var else general, bg=_CARD)
+            parent = about if var is self._auto_update_var else c3 if var is self._proof_var else general
+            row = tkinter.Frame(parent, bg=_CARD)
             row.pack(fill="x", pady=(p(10), p(10)))
             value_label = tkinter.Label(row, text="开" if var.get() else "关", bg=_CARD,
                                         fg=_SUB, width=2, font=(_FONT, -12))
@@ -634,7 +638,6 @@ class SettingsWindow:
             hint.pack(fill="x", pady=(p(2), 0))
             _wrap_label(hint)
 
-        about = card("about", "voice2text", "语音识别、标点与校对均在本机完成")
         update_row = tkinter.Frame(about, bg=_CARD)
         update_row.pack(fill="x", pady=(p(18), p(2)))
         update_box = tkinter.Frame(update_row, bg=_CARD)
@@ -723,14 +726,15 @@ class SettingsWindow:
         else:
             labels = {
                 "idle": "检查更新", "checking": "检查中…", "downloading": "下载中…",
-                "ready": "安装并重启", "current": "重新检查", "error": "重试",
+                "ready": "安装并重启", "current": "重新检查", "error": "重试", "installing": "安装中…",
             }
             text = labels.get(snapshot.state, "检查更新")
             fg = _SUB if snapshot.state in {"checking", "downloading"} else _TEXT
-            message = snapshot.message or "可手动检查 GitHub 正式版本"
+            message = snapshot.message or ("每 24 小时自动检查，下载后在空闲时安装"
+                                           if self._auto_update_var.get() else "可手动检查 GitHub 正式版本")
         self._update_status.set(message)
         self._update_button.set_style(text=text, fg=fg,
-                                      enabled=update_manager.supported and snapshot.state not in {"checking", "downloading"})
+                                      enabled=update_manager.supported and snapshot.state not in {"checking", "downloading", "installing"})
         self._update_poll = self.root.after(500, self._poll_update)
 
     def _cancel_polls(self, event) -> None:
@@ -952,6 +956,7 @@ class SettingsWindow:
         self._cfg["input_device"] = self._mic_selector_by_label.get(
             self._mic_var.get(), ""
         )
+        self._cfg["auto_update_enabled"] = bool(self._auto_update_var.get())
         self._cfg["sound_cue"] = bool(self._sound_var.get())
         self._cfg["autostart"] = bool(self._autostart_var.get())
         set_autostart(bool(self._autostart_var.get()))

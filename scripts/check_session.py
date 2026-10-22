@@ -17,7 +17,8 @@ from voice2text.desktop import RuntimeOutput, SingleInstance
 from voice2text.tray import build_tray, toggle_label
 from pystray._util import win32
 from voice2text.activity import InputActivityGuard
-from voice2text.main import DictationApp, UI_POLL_MS, resolve_help_document
+from voice2text.main import (DictationApp, UI_POLL_MS, resolve_help_document,
+                             auto_install_blocked, apply_verified_update)
 from voice2text.config import AppConfig, DEFAULTS
 from voice2text.proofread import Proofreader
 from voice2text.performance import PerformanceRecorder
@@ -77,6 +78,71 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(app.cmd_queue.get_nowait(), ("elevation_notice", reason))
         self.assertEqual(app.ui_queue.get_nowait(), ("state", "error"))
         self.assertFalse(app.active)
+
+    def test_unfocused_target_queues_visible_notice_without_recording(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._models_ready.set()
+        reason = "请先将光标放入要听写的输入框，再按快捷键开始"
+        with patch.object(app._inserter, "capture_target", side_effect=RuntimeError(reason)), \
+             patch.object(app._capture, "start") as start:
+            app.request_toggle()
+        self.assertEqual(app.cmd_queue.get_nowait(), ("target_notice", reason))
+        self.assertEqual(app.ui_queue.get_nowait(), ("state", "error"))
+        self.assertFalse(app.active)
+        self.assertFalse(app._busy)
+        start.assert_not_called()
+
+    def test_focus_lost_before_recording_queues_visible_notice(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        app._busy = True
+        app._inserter.abort("目标输入位置在启动录音前发生变化")
+        with patch.object(app._inserter, "guard_focus", return_value=False), \
+             patch.object(app._capture, "start") as start:
+            app._start_toggle()
+        notice, reason = app.cmd_queue.get_nowait()
+        self.assertEqual(notice, "target_notice")
+        self.assertIn("目标输入位置", reason)
+        self.assertFalse(app.active)
+        self.assertFalse(app._busy)
+        start.assert_not_called()
+
+    def test_auto_update_waits_for_preparation_dictation_and_user_operations(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        self.assertTrue(auto_install_blocked(app))
+        app._models_ready.set()
+        self.assertFalse(auto_install_blocked(app))
+        self.assertTrue(auto_install_blocked(app, settings_open=True))
+        self.assertTrue(auto_install_blocked(app, model_download_active=True))
+        self.assertTrue(auto_install_blocked(app, notice_visible=True))
+        self.assertFalse(auto_install_blocked(app, settings_open=False))
+        for name in ("_active", "_busy", "_closing"):
+            setattr(app, name, True)
+            self.assertTrue(auto_install_blocked(app))
+            setattr(app, name, False)
+
+    def test_update_handoff_failure_keeps_program_and_hotkeys_usable(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        manager = Mock()
+        manager.begin_install.return_value = True
+        with patch("voice2text.update.launch_installer", side_effect=OSError("cannot launch")):
+            self.assertFalse(apply_verified_update(app, manager, Path("verified.zip"), "9.9.9"))
+        self.assertFalse(app._closing)
+        manager.install_failed.assert_called_once()
+        with patch("voice2text.update.launch_installer") as launch:
+            self.assertTrue(apply_verified_update(app, manager, Path("verified.zip"), "9.9.9"))
+            self.assertTrue(app._closing)
+            self.assertFalse(apply_verified_update(app, manager, Path("verified.zip"), "9.9.9"))
+            launch.assert_called_once()
+            self.assertTrue(launch.call_args.kwargs["prevalidated"])
+
+    def test_update_handoff_never_installs_while_listening_or_proofreading(self):
+        app = DictationApp(AppConfig(**DEFAULTS))
+        manager = Mock()
+        for name in ("_active", "_busy"):
+            setattr(app, name, True)
+            self.assertFalse(apply_verified_update(app, manager, Path("verified.zip"), "9.9.9"))
+            setattr(app, name, False)
+        manager.begin_install.assert_not_called()
 
     def test_help_document_prefers_packaged_install_guide(self):
         from tempfile import TemporaryDirectory

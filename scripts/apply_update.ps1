@@ -47,7 +47,7 @@ try {
     }
     Write-UpdateLog ("updated to v" + $Version)
     if (-not $NoRestart) {
-        Start-Process -FilePath (Join-Path $InstallDir "run.bat") -WorkingDirectory $InstallDir
+        Start-Process -FilePath (Join-Path $InstallDir "run.bat") -WorkingDirectory $InstallDir -WindowStyle Hidden
     }
     Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
 } catch {

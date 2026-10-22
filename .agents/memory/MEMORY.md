@@ -8,24 +8,25 @@
 
 <!-- memory-index:start -->
 > 本段由 `python scripts/maintain.py` 自动重建，禁止手工编辑。
-> 最近重建：2026-10-22 01:10
+> 最近重建：2026-10-22 23:50
 
 ### user
 - [role.md](user/role.md) — 用户画像 · 更新于 2026-10-21 · active
 
 ### bugfix（docs/problems/bugfix/）
+- [悬浮窗不可用状态不会自动恢复](../../docs/problems/bugfix/widget-error-state-sticky.md) — fixed · low · active · 更新于 2026-10-22
+- [管理员目标窗口的权限提示只在运行输出中可见](../../docs/problems/bugfix/admin-target-warning-hidden-in-log.md) — fixed · medium · active · 更新于 2026-09-23
+- [输入焦点错误导致听写未开始却只有日志提示](../../docs/problems/bugfix/target-start-failure-notice.md) — fixed · medium · active · 更新于 2026-10-22
 - [Linux 构建的分发批处理被 CMD 截断解析](../../docs/problems/bugfix/release-batch-lf-cmd-parsing.md) — fixed · high · active · 更新于 2026-10-22
 - [候选包流程额外选择安装说明导致上传检查失败](../../docs/problems/bugfix/candidate-artifact-extra-guide.md) — fixed · low · active · 更新于 2026-10-22
 - [悬浮窗比例预览裁掉操作按钮与状态](../../docs/problems/bugfix/widget-preview-cropped-layout.md) — fixed · low · active · 更新于 2026-10-22
 - [高 DPI 屏幕上悬浮窗和设置界面偏小](../../docs/problems/bugfix/desktop-ui-too-small-at-high-dpi.md) — mitigated · medium · active · 更新于 2026-10-22
 - [连续说话时校对完全不生效（无标点、语气词残留）](../../docs/problems/bugfix/proofread-not-applied-continuous-speech.md) — fixed · high · active · 更新于 2026-09-23
 - [Windows Terminal / OpenCode TUI 听写已启动但没有文字](../../docs/problems/bugfix/terminal-tui-input.md) — mitigated · high · active · 更新于 2026-09-22
-- [管理员目标窗口的权限提示只在运行输出中可见](../../docs/problems/bugfix/admin-target-warning-hidden-in-log.md) — fixed · medium · active · 更新于 2026-09-23
 - [白色托盘图标在浅色任务栏上难以辨认](../../docs/problems/bugfix/tray-icon-invisible-on-light-taskbar.md) — fixed · low · active · 更新于 2026-09-23
 - [微信富文本输入框会话中断与锁句标点误覆盖](../../docs/problems/bugfix/weixin-volatile-input-and-punctuation-gate.md) — investigating · high · active · 更新于 2026-09-23
 - [录音使用系统静音默认设备而非真实麦克风](../../docs/problems/bugfix/selected-microphone-defaulted-to-silent-device.md) — fixed · high · active · 更新于 2026-09-23
 - [识别流尚未就绪时悬浮窗提前显示正在聆听](../../docs/problems/bugfix/listening-before-asr-ready.md) — fixed · high · active · 更新于 2026-09-23
-- [悬浮窗不可用状态不会自动恢复](../../docs/problems/bugfix/widget-error-state-sticky.md) — fixed · low · active · 更新于 2026-09-23
 - [调试录音在退出后可能残留于磁盘](../../docs/problems/bugfix/debug-audio-cleanup.md) — fixed · high · active · 更新于 2026-09-22
 - [Alt+V 多次切换后 Alt 修饰键可能残留按下状态](../../docs/problems/bugfix/hotkey-alt-latched-after-toggle.md) — mitigated · high · active · 更新于 2026-09-21
 - [临时粘贴失败或竞争时可能损坏正文与用户剪贴板](../../docs/problems/bugfix/clipboard-snapshot-failure.md) — fixed · high · active · 更新于 2026-09-22

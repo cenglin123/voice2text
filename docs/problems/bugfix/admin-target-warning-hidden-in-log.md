@@ -5,8 +5,8 @@ title: 管理员目标窗口的权限提示只在运行输出中可见
 status: fixed
 severity: medium
 liveness: active
-last_confirmed: 2026-09-23
-confirmed_count: 1
+last_confirmed: 2026-10-22
+confirmed_count: 2
 tags: [Windows, UIPI, elevation, UI, dictation]
 related_files: [voice2text/target.py, voice2text/main.py, scripts/check_session.py]
 verification:

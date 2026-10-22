@@ -136,7 +136,10 @@ def main():
             window.root.update()
             assert window._preview_photo.width() <= window._preview.winfo_width()
             window.sync_appearance(1.25, 1.0)
+            assert window._auto_update_var.get() is True
+            window._auto_update_var.set(False)
             window._save()
+            assert applied[0]["auto_update_enabled"] is False
             assert applied[0]["widget_scale"] == 1.25
             assert applied[0]["widget_aspect"] == 1.0
         finally:

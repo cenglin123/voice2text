@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import ImageGrab
 from voice2text import layered
+from voice2text.dpi import window_workarea
 from voice2text.widget import DictationWidget
 
 
@@ -80,6 +81,70 @@ def main() -> None:
         widget.show()
         widget.root.update()
         assert widget.root.winfo_viewable()
+
+        # 输入目标提示显示完整原因，不激活窗口，并约束在当前工作区内。
+        user = ctypes.WinDLL("user32")
+        user.GetForegroundWindow.restype = wintypes.HWND
+        focus_before = user.GetForegroundWindow()
+        long_reason = "无法进入聆听：当前焦点不是可编辑的文本输入位置。" * 18
+        widget.show_notice(long_reason)
+        widget.root.update()
+        notice = widget._notice_window
+        assert notice is not None and notice.winfo_viewable()
+        assert notice.cget("takefocus") in (False, "0")
+        assert widget._notice_text.get("1.0", "end-1c") == long_reason
+        assert user.GetForegroundWindow() == focus_before
+        work_left, work_top, work_right, work_bottom = window_workarea(widget.root)
+        nx, ny = notice.winfo_rootx(), notice.winfo_rooty()
+        nw, nh = notice.winfo_width(), notice.winfo_height()
+        assert work_left <= nx < nx + nw <= work_right
+        assert work_top <= ny < ny + nh <= work_bottom
+        get_long = user.GetWindowLongW
+        get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+        get_long.restype = ctypes.c_long
+        assert get_long(layered.window_handle(notice.winfo_id()), -20) & 0x08000000
+        first_notice = notice
+        widget.show_notice("新的原因已替换旧提示。")
+        widget.root.update()
+        assert widget._notice_window is first_notice
+        assert widget._notice_text.get("1.0", "end-1c") == "新的原因已替换旧提示。"
+        first_timer = widget._notice_job
+        widget.hide()
+        widget.show_notice("悬浮窗隐藏时仍显示提示。")
+        widget.root.update()
+        assert widget._notice_window is first_notice and first_notice.winfo_viewable()
+        assert widget._notice_job != first_timer
+        widget.set_state("error")
+        widget._reset_error()
+        widget.root.update()
+        assert widget.state == "idle"
+        assert widget._notice_window is first_notice and first_notice.winfo_viewable()
+        assert widget._notice_job is not None
+        widget.set_state("loading")
+        widget.root.update()
+        assert widget._notice_window is None and widget._notice_job is None
+        assert not first_notice.winfo_exists()
+
+        # 新建提示窗口模拟 200% DPI，字体采用负像素字号，脚注完整留在卡片内。
+        original_dpi_scale = widget._dpi_scale
+        widget._cancel_notice()
+        widget._dpi_scale = 2.0
+        widget.show_notice("200% DPI 下的提示原因。")
+        widget.root.update()
+        notice = widget._notice_window
+        pixel_size = lambda font: int(widget.root.tk.splitlist(font)[1])
+        assert pixel_size(widget._notice_title.cget("font")) == -32
+        assert pixel_size(widget._notice_text.cget("font")) == -28
+        assert pixel_size(widget._notice_footer.cget("font")) == -24
+        work_left, work_top, work_right, work_bottom = window_workarea(widget.root)
+        nx, ny, nw, nh = notice.winfo_rootx(), notice.winfo_rooty(), notice.winfo_width(), notice.winfo_height()
+        assert work_left <= nx < nx + nw <= work_right
+        assert work_top <= ny < ny + nh <= work_bottom
+        assert widget._notice_footer.winfo_ismapped()
+        assert widget._notice_footer.winfo_rooty() + widget._notice_footer.winfo_height() <= ny + nh
+        widget.set_state("loading")
+        widget._dpi_scale = original_dpi_scale
+        print("PASS nonactivating notice, long Chinese reason, workarea bounds, hidden widget, replacement and state cleanup")
 
         # 右下角拖动会同时更新缩放和长宽比，并在释放时同步给配置层。
         resized = []
@@ -178,8 +243,21 @@ def main() -> None:
         assert widget._photo is not None
         assert not failures, failures
         print("PASS injected ULW failure -> opaque Tk fallback; fallback resize and state")
-    finally:
+
+        widget.show_notice("退出时必须取消提示窗口与计时器。")
+        pending_notice = widget._notice_window
+        notice_destroyed = []
+        pending_notice.bind("<Destroy>", lambda event: notice_destroyed.append(event.widget is pending_notice))
         widget.root.destroy()
+        assert widget._notice_job is None and widget._notice_window is None
+        assert notice_destroyed
+        assert not failures, failures
+        print("PASS root destroy cleans notice window and timer")
+    finally:
+        try:
+            widget.root.destroy()
+        except tkinter.TclError:
+            pass
 
     with patch.object(layered, "enable_blur", return_value=False):
         widget = DictationWidget()
