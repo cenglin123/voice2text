@@ -4,9 +4,8 @@
 
 ## 当前任务
 
-源码已准备 `0.1.7`，包含自动更新和焦点失败提示；正在打包验收。
-发行进度见 `docs/plans/active/release-v017.md`。
-GitHub 最新正式版仍为 `0.1.6`，标签指向 `347748d`。
+源码与 GitHub 最新正式发行版均为 `0.1.7`，标签指向 `b0cfe7a`。
+发行验收见 `docs/plans/completed/release-v017.md`。
 
 - 自动更新默认开启，运行时每 24 小时检查 GitHub 正式版，后台下载并验证后等待安全空闲再安装重启；
   关于页可关闭开关或手动更新。检查时间跨重启持久化，失败不密集重试，源码环境不自动联网更新。
@@ -45,12 +44,14 @@ GitHub 最新正式版仍为 `0.1.6`，标签指向 `347748d`。
 - 治理升级后 `check_all.py --quiet`、`audit.py check`、`maintain.py --check` 均通过；
   治理文档改动已按硬约束分级，由 3 名独立 reviewer 复查（结论见
   `docs/plans/completed/governance-upgrade.md`）。
-- 本地 `dist/voice2text-v0.1.6-windows-x64.zip` 为 471,878,237 字节，SHA-256：
-  `7cd86b3825b3eedee50ce987a4822454ca2f51f109a2ec0a29f249176add21c2`。
-  GitHub Latest 的资产摘要/大小与本地一致。Actions `39641914772` 从 `347748d` 组装候选包，
-  下载回 Windows 独立目录后核对 CRC、源码、四 BAT 原始 CRLF、基线与默认配置，完成
-  禁用 Python 网络连接的模型加载、实际中文 CMD 安装、快捷方式与 GUI 检查。
-  独立 reviewer 执行 `check_release.py` 通过；`check_all.py --quiet` 通过。
+- 本地 `dist/voice2text-v0.1.7-windows-x64.zip` 为 471,885,665 字节，SHA-256：
+  `7de5073fb34fa7de4d17333f677bac943a89cd0fd548eccd45bdf0d0401187fe`。
+  Actions `39809851842` 从 `b0cfe7a` 组装候选并下载回 Windows 独立目录；摘要、CRC、
+  标签源码、四 BAT 原始 CRLF、源码基线和默认配置均通过。实际中文 CMD 安装完成依赖检查、
+  ASR/标点模型加载及快捷方式创建；禁用 Python 网络连接时模型加载也通过。
+- 包内设置、托盘、焦点原因卡不抢焦点且 idle 保留/loading 清除、自动更新默认开启、
+  假 Latest 调度与跨实例 24h 记账均通过；不触发现用目录真实自更新。
+  源码更新/会话/界面回归与独立复核见 `docs/plans/completed/automatic-update.md`。
 - 用户此前确认 v0.1.4 的浅色任务栏、微信、WPS、Windows Terminal 和 Windows 10 虚拟机真机验收通过。
   高 DPI 真机仍有问题，模拟缩放回归不能视为该问题已解决；麦克风切换和不同权限组合
   未在本次反馈中单独确认。
@@ -58,7 +59,7 @@ GitHub 最新正式版仍为 `0.1.6`，标签指向 `347748d`。
   已截图检查常规、识别与校对、关于页。DPI API、悬浮窗、托盘及独立进程 PMv1 检查通过。
   独立复核见 `docs/plans/completed/desktop-ui-refinement.md`。
 - v0.1.5 完成 150 种渲染布局、三状态预览、长快捷键和真实禁用态回归与独立复核。
-  界面验收见 `docs/plans/completed/desktop-ui-v015.md`；安装入口现由 v0.1.6 单独回归覆盖。
+  界面验收见 `docs/plans/completed/desktop-ui-v015.md`；安装入口由最新分发验收单独覆盖。
 - 连续讲话的模拟切段、上下文投影和校对边界回归通过；本地标点/Qwen 模型样例通过。
   真正长时间语音的语意质量仍须在用户设备验证。Qwen 仍按约 60 字合并短段；单段过长时
   保持完整，1.7B 模型可能照抄或错改，此时安全门禁保留原文。
@@ -66,7 +67,7 @@ GitHub 最新正式版仍为 `0.1.6`，标签指向 `347748d`。
 ## 下一步
 
 1. 在高 DPI 笔记本上复验最新源码，尤其正文与控件比例、悬浮窗跨屏和托盘换屏弹出。
-2. 补充 v0.1.6 的麦克风切换、不同权限组合、首次启动准备态和 Windows 10 虚拟机复验反馈。
+2. 补充 v0.1.7 的麦克风切换、不同权限组合、首次启动准备态和 Windows 10 虚拟机复验反馈。
 
 ## 已知取舍
 
